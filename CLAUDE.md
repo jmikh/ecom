@@ -1,189 +1,278 @@
-# E-commerce Product Search Assistant
+# Shopify E-commerce Product Ingestion System
 
 ## Overview
-AI-powered assistant that answers natural-language queries about a product catalog using hybrid search combining SQL filters and semantic similarity. Built with PostgreSQL + pgvector, Python, and OpenAI embeddings.
+Multi-tenant Shopify product ingestion system that fetches products from Shopify stores, processes them into a structured database, and generates semantic embeddings for search. Built with PostgreSQL + pgvector, Python, and OpenAI embeddings.
 
 ## Architecture
 
 ### Core Components
 
-1. **Query Parser** (`src/agent/query_agent.py`)
-   - Uses LLM (gpt-4o-mini or gpt-5-mini) to parse natural language queries
-   - Extracts structured filters (category, price, etc.) and semantic query
-   - Cleans filters based on available schema columns
+1. **Shopify Fetcher** (`src/pipeline/fetch_products.py`)
+   - Fetches products from Shopify Admin API with pagination
+   - Handles rate limiting (2 requests/second)
+   - Extracts products, variants, images, and options
+   - Saves raw data to JSON files
 
-2. **Search Tools** (`src/search/tools.py`)
-   - `hybrid_search()`: Combines SQL filtering with semantic search
-   - `semantic_search()`: Vector similarity search using pgvector
-   - Deduplicates results by product, keeping best score per product
-   - Returns top k=20 products by default
+2. **Database Inserter** (`src/pipeline/insert_products.py`)
+   - Processes JSON data into normalized database tables
+   - Computes price ranges, discounts, and structured options
+   - Handles products, variants, images, and embedding text
+   - Uses DELETE/INSERT pattern for data consistency
 
-3. **Ingestion Pipeline** (`src/pipeline/ingest.py`)
-   - Dynamically infers schema from products.json
-   - Creates embeddings for high-cardinality fields (>40 unique values)
-   - Batches embedding generation by field (100 products per API call)
-   - Updates metadata table with column statistics
+3. **Embedding Generator** (`src/pipeline/generate_embeddings.py`)
+   - Creates embeddings from product title, type, tags, vendor, options, description
+   - Batch processing with OpenAI text-embedding-3-small model
+   - Stores 1536-dimension vectors for semantic search
+
+4. **Tenant Manager** (`src/database/manage_tenants.py`)
+   - Creates, lists, and deletes tenants
+   - Auto-generates UUIDs for tenant isolation
+   - Manages multi-tenant data separation
+
+5. **Pipeline Orchestrator** (`src/pipeline/ingest_shopify.py`)
+   - Coordinates full pipeline: fetch → insert → embeddings
+   - Supports individual operations or complete workflow
+   - Validates tenant existence and JSON file requirements
 
 ### Database Schema
 
-**products table**: Dynamic schema based on JSON data
-- Text fields: category, product_name, material, etc.
-- Array fields: options, reviews
-- Numeric fields: price, review_avg_score
+**Multi-tenant Architecture with Row Level Security (RLS)**
 
-**embeddings table**:
-- product_id (FK)
-- field (which field was embedded)
-- embedding (vector 1536 dimensions)
+```sql
+-- Tenant isolation
+tenants (tenant_id UUID PRIMARY KEY, name TEXT, created_at, updated_at)
 
-**metadata table**:
-- column_name, data_type
-- is_low_cardinality (≤40 distinct values)
-- distinct_values (for low-cardinality fields)
-- min_value, max_value (for numeric fields)
+-- Product hierarchy
+products (id, tenant_id FK, shopify_id, title, vendor, product_type, 
+         min_price, max_price, has_discount, options JSONB, ...)
+         
+product_variants (id, product_id FK, tenant_id FK, shopify_variant_id,
+                 price, compare_at_price, sku, options, image_id FK, ...)
+                 
+product_images (id, product_id FK, tenant_id FK, shopify_image_id,
+               src, alt, position, variant_ids[], ...)
 
-## Search Flow
+-- Embedding system
+product_embedding_text (product_id FK, tenant_id FK, embedding_text TEXT)
+product_embeddings (product_id FK, tenant_id FK, embedding VECTOR(1536))
+```
 
-1. **Query Parsing**
-   - LLM extracts filters and semantic query
-   - Filters cleaned against schema (removes non-existent columns)
+**Key Features:**
+- UUID-based tenant isolation for security
+- CASCADE deletes maintain referential integrity
+- JSONB for flexible product options storage
+- pgvector for semantic search capabilities
+- Comprehensive indexing for performance
 
-2. **Hybrid Search**
-   - SQL count for logging
-   - Semantic search with SQL prefiltering
-   - Deduplication by product ID
-   - Returns top 100 products
+## Usage
 
-3. **LLM Filtering** (final step)
-   - Takes top 5 products
-   - LLM evaluates each with rank and reason
-   - Returns max 3 best matches
+### 1. Database Setup
+```bash
+# Create database with pgvector extension
+source venv/bin/activate
+python src/database/setup.py
+```
 
-## Key Improvements Made
+### 2. Tenant Management
+```bash
+# Create a new tenant
+python src/database/manage_tenants.py create "Store Name"
 
-### Array Field Handling
-- Fixed PostgreSQL array overlap operator (`&&`) for array columns
-- Proper IN clause for text columns
-- Prevents "operator does not exist" errors
+# List all tenants
+python src/database/manage_tenants.py list
 
-### Semantic Search Deduplication
-- Searches across ALL embedding fields
-- Keeps best score per product (not per embedding)
-- Prevents duplicate products in results
+# Delete tenant (WARNING: deletes all data)
+python src/database/manage_tenants.py delete <tenant-uuid>
+```
 
-### Numeric Field Support
-- Added numeric fields to metadata table
-- Stores min/max values for range queries
-- Enables price filtering
+### 3. Product Ingestion
 
-### Mock Modes
-- Embedding mock mode: Uses zero vectors to avoid API costs
-- Query parser mock mode: Prints OpenAI requests without sending
+**Full Pipeline (Recommended):**
+```bash
+python src/pipeline/ingest_shopify.py \
+  --shopify-url https://store.myshopify.com \
+  --json-file products.json \
+  --tenant-id <tenant-uuid>
+```
+
+**Individual Operations:**
+```bash
+# Fetch only
+python src/pipeline/ingest_shopify.py --fetch-only \
+  --shopify-url https://store.myshopify.com \
+  --json-file products.json \
+  --tenant-id <tenant-uuid>
+
+# Insert only
+python src/pipeline/ingest_shopify.py --insert-only \
+  --json-file products.json \
+  --tenant-id <tenant-uuid>
+
+# Embeddings only
+python src/pipeline/ingest_shopify.py --embeddings-only \
+  --tenant-id <tenant-uuid>
+```
+
+**Direct Script Usage:**
+```bash
+# Individual components
+python src/pipeline/fetch_products.py https://store.myshopify.com products.json
+python src/pipeline/insert_products.py products.json --tenant-id <uuid>
+python src/pipeline/generate_embeddings.py --tenant-id <uuid>
+```
 
 ## Configuration
 
 ### Environment Variables (.env)
-```
-DB_NAME=ecom_products
+```bash
+# Database Configuration
 DB_HOST=localhost
 DB_PORT=5432
-DB_USER=postgres
-DB_PASSWORD=
+DB_USER=your_user
+DB_PASSWORD=your_password
+DB_NAME=ecom_products
+
+# Shopify Configuration
+SHOPIFY_SHOP_URL=https://store.myshopify.com
+SHOPIFY_ACCESS_TOKEN=shpat_...
+SHOPIFY_API_VERSION=2025-07
+
+# OpenAI Configuration
 OPENAI_API_KEY=sk-...
-OPENAI_MODEL=gpt-4o-mini  # or gpt-5-mini
+OPENAI_MODEL=gpt-5-mini
 ```
 
 ### Key Parameters
-- Cardinality threshold: 40 (for low/high cardinality decision)
-- Embedding dimensions: 1536 (text-embedding-3-small)
-- Batch size: 100 products per embedding API call
-- Default search limit: 20 products
-- LLM filtering: Top 5 → Max 3 results
+- **Embedding Batch Size**: 100 products per OpenAI API call
+- **Shopify Rate Limit**: 2 requests/second (0.5s delay)
+- **Embedding Model**: text-embedding-3-small (1536 dimensions)
+- **Tenant Isolation**: UUID-based with RLS policies
 
-## Testing Tools
+## Data Flow
 
-**test_agent.py**: Full search pipeline testing
-```bash
-python test_agent.py "colorful bracelets"
-python test_agent.py --interactive
-python test_agent.py --examples --mock
+### Ingestion Pipeline
+1. **Fetch**: Shopify API → JSON file
+   - Paginated product retrieval
+   - Rate limiting compliance
+   - Complete product/variant/image data
+
+2. **Process**: JSON → Database tables
+   - Normalize Shopify data structure
+   - Compute price ranges and discount flags
+   - Extract options into JSONB format
+   - Generate embedding text content
+
+3. **Embed**: Text → Vector embeddings
+   - Combine title, type, tags, vendor, options, description
+   - Batch API calls for efficiency
+   - Store vectors for similarity search
+
+### Embedding Content Structure
+```json
+{
+  "title": "Product Name",
+  "product_type": "Category",
+  "tags": "tag1, tag2, tag3",
+  "vendor": "Brand Name",
+  "options": {"Size": ["S", "M", "L"], "Color": ["Red", "Blue"]},
+  "description": "Clean text from body_html"
+}
 ```
 
-**test_similarity.py**: Direct embedding similarity testing
-```bash
-python test_similarity.py "silver" --field combined
-python test_similarity.py "silver" --compare-fields
-```
+## Multi-Tenant Features
 
-## Common Issues & Solutions
+### Tenant Isolation
+- **Database Level**: Row Level Security policies
+- **Application Level**: Tenant context setting
+- **Data Integrity**: Foreign key constraints to tenants table
+- **Cleanup**: CASCADE deletes when tenant removed
 
-### "Live Life In Full Color" not appearing
-- Caused by semantic search returning embeddings, not products
-- Fixed by deduplicating by product ID
+### Security Benefits
+- UUID tenant IDs prevent enumeration attacks
+- RLS ensures queries only see tenant's data
+- No cross-tenant data leakage
+- Secure API key management per tenant
 
-### Price filter being removed
-- Numeric fields weren't in metadata table
-- Fixed by processing numeric fields during ingestion
+## Performance & Monitoring
 
-### SQL operator errors
-- Array fields need `&&` operator, not `IN`
-- Fixed by checking column type before building WHERE clause
+### Batch Processing
+- **Products**: Processed individually with commit every 10
+- **Variants**: Bulk insert via execute_batch
+- **Images**: Individual inserts with FK mapping
+- **Embeddings**: Batched API calls (100 products)
 
-### NoneType similarity scores
-- Some embeddings returned NULL scores
-- Fixed by checking for None before formatting
+### Database Optimization
+- **Indexes**: Strategic indexes on tenant_id, shopify_id, prices
+- **JSONB**: GIN indexes on options for fast queries
+- **Vectors**: IVFFlat index for similarity search
+- **Foreign Keys**: Optimized CASCADE relationships
 
-## Search Funnel Logging
+## Error Handling
 
-Tracks product counts at each stage:
-1. Total products in database
-2. SQL filtered results
-3. Semantic search results
-4. Combined & ranked results
-5. Pre-LLM filtering (top 5)
-6. Final results after LLM filtering
+### Robust Ingestion
+- **API Errors**: Retry with backoff, detailed error reporting
+- **Database Errors**: Transaction rollback, halt on critical failures
+- **Validation**: UUID format checking, file existence verification
+- **Tenant Verification**: Ensures tenant exists before processing
 
-## Usage Examples
-
-### Running Components
-```bash
-# Ingest products with embeddings
-python src/pipeline/ingest.py
-
-# Mock mode (no API calls)
-python src/pipeline/ingest.py --mock
-
-# Test search interactively
-python test_agent.py --interactive
-
-# Test specific queries
-python test_agent.py "red silk dress under $100"
-python test_agent.py "comfortable workout clothes"
-
-# Debug similarity scores
-python test_similarity.py "silver jewelry" --field combined
-```
+### Recovery Strategies
+- **Partial Failures**: Individual operations can be retried
+- **Data Consistency**: DELETE/INSERT ensures clean state
+- **Embedding Recovery**: Regenerate embeddings without affecting products
 
 ## Files Structure
 ```
 src/
-├── agent/query_agent.py      # Main query processing & orchestration
-├── search/tools.py           # Core search functions & database queries  
-├── pipeline/ingest.py        # Data ingestion & embedding generation
-test_agent.py                 # Full pipeline testing tool
-test_similarity.py            # Embedding similarity debugging
-products.json                 # Input product catalog
-schema.sql                    # Database schema definitions
+├── database/
+│   ├── setup.py              # Database schema creation
+│   └── manage_tenants.py     # Tenant CRUD operations
+├── pipeline/
+│   ├── fetch_products.py     # Shopify API client
+│   ├── insert_products.py    # Database insertion
+│   ├── generate_embeddings.py # Vector generation
+│   └── ingest_shopify.py     # Pipeline orchestration
+└── .env                      # Configuration
 ```
 
-## Performance & Monitoring
-- **Search Funnel Logging**: Tracks product counts through each filter stage
-- **Embedding Efficiency**: ~460 embeddings in 5 API calls (100 products/call)
-- **Result Limits**: 20 semantic results → 5 for LLM → max 3 final results
-- **Rate Limiting**: 1 second between OpenAI API calls
-
 ## Development Notes
-- Always test with mock mode first to avoid API costs
-- Re-run ingestion after schema changes to update metadata
-- Use similarity testing to debug unexpected search results
-- Check logs for search funnel metrics to understand filtering
+
+### Best Practices
+- Always create tenants before ingestion
+- Validate Shopify credentials in .env
+- Monitor API rate limits during fetching
+- Use DELETE/INSERT for data consistency
+- Test with small datasets first
+
+### Common Issues
+- **403 Errors**: Check Shopify access token permissions
+- **Rate Limiting**: Built-in delays handle Shopify limits
+- **Memory Usage**: Large catalogs processed in batches
+- **Embedding Costs**: Monitor OpenAI usage during development
+
+### Troubleshooting
+```bash
+# Check tenant exists
+python src/database/manage_tenants.py list
+
+# Verify database connection
+psql -h localhost -U user -d ecom_products -c "SELECT COUNT(*) FROM tenants;"
+
+# Test Shopify connection
+python src/pipeline/fetch_products.py https://store.myshopify.com test.json
+
+# Monitor embeddings generation
+tail -f embedding_logs.txt  # If logging enabled
+```
+
+## Scaling Considerations
+
+### Multi-Store Support
+- Each Shopify store gets unique tenant_id
+- Isolated data processing per tenant
+- Concurrent ingestion possible with different tenants
+
+### Performance Tuning
+- Adjust embedding batch sizes based on OpenAI limits
+- Scale database connections for concurrent tenants
+- Implement queue system for large-scale ingestion
+- Consider read replicas for analytics workloads
