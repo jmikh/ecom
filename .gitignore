@@ -54,6 +54,10 @@ logs/
 *.sqlite
 *.sqlite3
 
+# Redis persistence
+dump.rdb
+appendonly.aof
+
 # Testing
 .pytest_cache/
 .coverage
