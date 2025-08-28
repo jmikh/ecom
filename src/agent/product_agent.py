@@ -2,7 +2,7 @@
 LangGraph Product Recommendation Agent with Memory
 """
 
-from typing import TypedDict, List, Dict, Any, Optional, Sequence
+from typing import List, Dict, Any, Optional, Sequence
 from datetime import datetime
 import json
 import uuid
@@ -16,20 +16,8 @@ from langchain_openai import ChatOpenAI
 from .config import config
 from .tools.database_tools import DatabaseTools
 from .memory import ConversationMemory, SessionManager
+from .mission_control_agent import GraphState
 # Removed custom tracing - using LangSmith directly
-
-
-class AgentState(TypedDict):
-    """State schema for the agent"""
-    messages: Sequence[BaseMessage]
-    session_id: str
-    tenant_id: str
-    user_context: Dict[str, Any]  # User preferences, previously viewed products, etc.
-    current_products: List[Dict[str, Any]]  # Products being discussed
-    search_history: List[Dict[str, Any]]  # Previous searches in session
-    next_action: Optional[str]  # Next action to take
-    tool_params: Optional[Dict[str, Any]]  # Parameters for tool execution
-    final_answer: Optional[str]  # Final response to user
 
 
 class ProductAgent:
@@ -41,9 +29,10 @@ class ProductAgent:
         self.tenant_id = tenant_id
         self.session_id = session_id or str(uuid.uuid4())
         
-        # Initialize tools - use traced tools for better LangSmith visibility
+        # Initialize tools - single unified search tool
         self.db_tools = DatabaseTools(tenant_id)
-        self.tools = self.db_tools.get_traced_tools()  # Use @tool decorated versions
+        self.search_tool = self.db_tools.get_traced_tool()  # Single search tool
+        self.tools = [self.search_tool]
         self.tool_node = ToolNode(self.tools)
         
         # Initialize LLM with verbose logging
@@ -65,10 +54,9 @@ class ProductAgent:
         """Build the LangGraph workflow"""
         
         # Define the graph
-        workflow = StateGraph(AgentState)
+        workflow = StateGraph(GraphState)
         
         # Add nodes
-        workflow.add_node("retrieve_context", self._retrieve_context)
         workflow.add_node("plan", self._plan_action)
         workflow.add_node("execute_tool", self._execute_tool)
         workflow.add_node("validate_results", self._validate_results)
@@ -76,9 +64,9 @@ class ProductAgent:
         workflow.add_node("update_memory", self._update_memory)
         
         # Add edges
-        workflow.set_entry_point("retrieve_context")
+        workflow.set_entry_point("plan")
         
-        workflow.add_edge("retrieve_context", "plan")
+        # workflow.add_edge("retrieve_context", "plan")  # Context now handled by mission control
         
         workflow.add_conditional_edges(
             "plan",
@@ -111,165 +99,122 @@ class ProductAgent:
     
     def _create_system_prompt(self) -> str:
         """Create the system prompt for the agent"""
-        schema_info = self.db_tools.get_schema_info()
-        
-        return f"""You are an intelligent e-commerce product recommendation assistant.
+        return """You are an intelligent e-commerce product recommendation assistant.
         
 Your role is to help users find products, answer questions about products, and make personalized recommendations.
-
-## Available Information:
-- Total products: {schema_info['total_products']}
-- Product types: {', '.join(schema_info['product_types'][:10])}...
-- Vendors: {', '.join(schema_info['vendors'][:10])}...
-- Price range: ${schema_info['price_range']['min']:.2f} - ${schema_info['price_range']['max']:.2f}
-- Options available: {', '.join(schema_info['available_options'])}
 
 ## Your Capabilities:
 1. Search products by specific criteria (type, price, vendor, discount)
 2. Find products using natural language descriptions
-3. Get detailed information about specific products
-4. Find similar products to ones the user likes
-5. Remember user preferences and previous interactions
-6. Make personalized recommendations based on browsing history
+3. Combine filters with semantic search for best results
+4. Remember conversation context
 
 ## Guidelines:
 - Be helpful and conversational
 - Ask clarifying questions when search criteria are vague
 - Explain why you're recommending certain products
-- Remember what products the user has already seen
-- Provide diverse options when making recommendations
-- Always validate that results match user intent before presenting them
-
-## Response Format:
 - Present products in a clear, organized way
 - Include key details: name, price, vendor, key features
-- Explain why each product matches the user's needs
 - Suggest follow-up actions or related searches
 """
     
-    def _retrieve_context(self, state: AgentState) -> AgentState:
-        """Retrieve conversation context and user history"""
-        print(f"🔍 STEP: retrieve_context")
-        
-        # Get conversation history
-        history = self.memory.get_conversation_history()
-        
-        # Get user context (preferences, viewed products)
-        user_context = self.session_manager.get_session_data(
-            self.session_id, 
-            self.tenant_id
-        )
-        
-        # Update state
-        state["user_context"] = user_context or {}
-        
-        # Add history to messages if not already present
-        if not any(isinstance(m, AIMessage) for m in state["messages"][:-1]):
-            history_messages = []
-            for item in history[-5:]:  # Last 5 exchanges
-                if item["role"] == "user":
-                    history_messages.append(HumanMessage(content=item["content"]))
-                elif item["role"] == "assistant":
-                    history_messages.append(AIMessage(content=item["content"]))
-            
-            # Insert history before current message
-            if history_messages:
-                state["messages"] = history_messages + state["messages"]
-        
-        return state
     
-    def _plan_action(self, state: AgentState) -> AgentState:
+    def _plan_action(self, state: GraphState) -> GraphState:
         """Plan the next action based on current state"""
         print(f"🧠 STEP: plan_action - about to call LLM")
         
-        # Plan the next action based on current state
-        
-        # Create planning prompt
+        # Create planning prompt using chat_messages (clean conversation history)
+        # SystemMessage goes to internal_messages, not chat_messages
         messages = [
             SystemMessage(content=self._create_system_prompt()),
-            *state["messages"]
+            *state.chat_messages  # Only user ↔ assistant conversation
         ]
         
         # Add context about current products if any
-        if state.get("current_products"):
-            context = f"Currently showing {len(state['current_products'])} products."
+        # This SystemMessage is for LLM context only, NOT part of user conversation
+        if state.current_products:
+            context = f"Currently showing {len(state.current_products)} products."
             messages.append(SystemMessage(content=context))
         
-        # Add search history context
-        if state.get("search_history"):
-            searches = [str(s["query"]) for s in state["search_history"][-3:]]
-            context = f"Recent searches: {', '.join(searches)}"
-            messages.append(SystemMessage(content=context))
         
         # Get LLM decision
         planning_prompt = f"""Based on the conversation, decide what action to take.
 
-Available tools:
-- sql_search_tool: For structured searches (price, category, vendor filters)
-- semantic_search_tool: For natural language product searches
-- get_schema_info_tool: To understand available product types and price ranges
-- get_product_details_tool: For detailed product information
-- get_similar_products_tool: To find similar products
+Available tool:
+- search_products: Unified search that handles both filters and semantic queries
 
-For the user query, choose the most appropriate tool:
-- If asking about products with specific criteria (price, type, vendor) → sql_search_tool
-- If asking with natural language descriptions → semantic_search_tool
-- If asking "what do you have" or general questions → get_schema_info_tool
+Analyze the user query and extract:
+1. Filters (exact matches): product_type, vendor, min_price, max_price, has_discount, tags
+2. Semantic query: Natural language description for similarity search
+3. Number of results (k): Default 12
 
-Respond with the exact tool name and parameters, or 'respond' if ready to answer.
-Format: {{"action": "tool_name", "params": {{...}}}} or {{"action": "respond"}}
+Examples:
+- "Show me Nike shoes under $100" → {{"action": "search_products", "params": {{"filters": {{"vendor": "Nike", "product_type": "Shoes", "max_price": 100}}, "k": 12}}}}
+- "Comfortable running shoes for marathon" → {{"action": "search_products", "params": {{"semantic_query": "comfortable running shoes for marathon", "k": 12}}}}
+- "Red jackets on sale" → {{"action": "search_products", "params": {{"filters": {{"product_type": "Jackets", "has_discount": true}}, "semantic_query": "red", "k": 12}}}}
+
+Respond with the tool call or 'respond' if ready to answer.
+Format: {{"action": "search_products", "params": {{...}}}} or {{"action": "respond"}}
 """
+        # This HumanMessage is for internal LLM prompting, NOT part of user conversation
         messages.append(HumanMessage(content=planning_prompt))
         
+        # Add all LLM request messages to internal_messages for debugging flow
+        state.internal_messages = list(state.internal_messages) + messages
+        
         print(f"📞 CALLING LLM with {len(messages)} messages")
+        print(f"📞 MESSAGES ARE:\n")
+        for msg in messages:
+            print(msg)
         response = self.llm.invoke(messages)
         print(f"📨 LLM RESPONSE: {response.content[:100]}...")
         
+        # Add LLM response to internal_messages for debugging flow
+        state.internal_messages = list(state.internal_messages) + [AIMessage(content=f"PLAN_ACTION_LLM_RESPONSE: {response.content}")]
+        
         try:
             decision = json.loads(response.content)
-            state["next_action"] = decision.get("action", "respond")
+            state.next_action = decision.get("action", "respond")
             
             if decision.get("params"):
                 # Store parameters for tool execution
-                state["tool_params"] = decision["params"]
+                state.tool_params = decision["params"]
             else:
                 # Clear tool_params if no params provided
-                state["tool_params"] = {}
+                state.tool_params = {}
             
-            print(f"🎯 PARSED DECISION: action={state['next_action']}, params={state.get('tool_params', {})}")
+            print(f"🎯 PARSED DECISION: action={state.next_action}, params={state.tool_params or {}}")
         except Exception as e:
             print(f"❌ JSON parsing failed: {e}, raw response: {response.content}")
             # Default to generating response if parsing fails
-            state["next_action"] = "respond"
+            state.next_action = "respond"
         
         return state
     
-    def _should_execute_tool(self, state: AgentState) -> str:
+    def _should_execute_tool(self, state: GraphState) -> str:
         """Decide whether to execute a tool or generate response"""
-        action = state.get("next_action", "respond")
+        action = state.next_action or "respond"
         
-        if action in ["sql_search_tool", "semantic_search_tool", "get_product_details_tool", 
-                     "get_similar_products_tool", "get_schema_info_tool"]:
+        if action == "search_products":
             return "execute_tool"
         else:
             return "generate_response"
     
-    def _should_continue_or_respond(self, state: AgentState) -> str:
+    def _should_continue_or_respond(self, state: GraphState) -> str:
         """Decide whether to continue searching or generate final response"""
-        action = state.get("next_action", "respond")
+        action = state.next_action or "respond"
         
         if action == "respond":
             return "respond"
-        elif action in ["sql_search_tool", "semantic_search_tool", "get_product_details_tool", 
-                       "get_similar_products_tool", "get_schema_info_tool"]:
+        elif action == "search_products":
             return "continue"
         else:
             return "respond"
     
-    def _execute_tool(self, state: AgentState) -> AgentState:
+    def _execute_tool(self, state: GraphState) -> GraphState:
         """Execute the selected tool"""
-        tool_name = state.get("next_action")
-        tool_params = state.get("tool_params", {})
+        tool_name = state.next_action
+        tool_params = state.tool_params or {}
         
         print(f"🛠️ STEP: execute_tool - tool: {tool_name}, params: {tool_params}")
         
@@ -285,73 +230,53 @@ Format: {{"action": "tool_name", "params": {{...}}}} or {{"action": "respond"}}
                 # Execute tool with proper parameter handling
                 print(f"🔧 Executing {tool_name} with params: {tool_params}")
                 
-                if tool_name == "sql_search_tool":
-                    # Extract filters from tool_params and call with correct signature
-                    filters = {k: v for k, v in tool_params.items() if k != 'limit'}
-                    limit = tool_params.get('limit', 20)
-                    result = tool.func(filters, limit)
-                elif tool_name == "semantic_search_tool":
-                    query = tool_params.get('query', '')
-                    limit = tool_params.get('limit', 20)
-                    result = tool.func(query, limit)
-                elif tool_name == "get_similar_products_tool":
-                    product_id = tool_params.get('product_id')
-                    limit = tool_params.get('limit', 5)
-                    result = tool.func(product_id, limit)
-                elif tool_name == "get_product_details_tool":
-                    product_ids = tool_params.get('product_ids', [])
-                    result = tool.func(product_ids)
+                if tool_name == "search_products":
+                    # Extract parameters for search
+                    filters = tool_params.get('filters', {})
+                    semantic_query = tool_params.get('semantic_query', None)
+                    k = tool_params.get('k', 12)
+                    result = tool.func(filters=filters, semantic_query=semantic_query, k=k)
                 else:
-                    # For tools that don't need parameters
-                    result = tool.func()
+                    # Should not happen with single tool
+                    result = []
                 
                 print(f"✅ Tool execution successful, got {len(result) if isinstance(result, list) else 1} results")
                 
                 # Store results
                 if isinstance(result, list):
-                    state["current_products"] = result
-                    
-                    # Update search history
-                    if "search_history" not in state:
-                        state["search_history"] = []
-                    
-                    state["search_history"].append({
-                        "query": tool_params,
-                        "tool": tool_name,
-                        "results": len(result),
-                        "timestamp": datetime.now().isoformat()
-                    })
+                    state.current_products = result
                 
-                # Add tool result to messages as system message instead of ToolMessage
-                # to avoid OpenAI API tool calling format requirements
+                # Add tool result to internal_messages (NOT chat_messages)
+                # These are internal processing details, not part of user conversation
                 result_message = SystemMessage(
                     content=f"Tool {tool_name} executed successfully. Result: {json.dumps(result, default=str)[:500]}..."
                 )
-                state["messages"].append(result_message)
+                state.internal_messages = list(state.internal_messages) + [result_message]
                 
             except Exception as e:
-                # Handle tool execution errors
+                # Handle tool execution errors - goes to internal_messages (NOT chat_messages)
+                # Tool errors are internal processing details, not part of user conversation
                 error_message = ToolMessage(
                     content=f"Error executing {tool_name}: {str(e)}",
                     tool_call_id=tool_name
                 )
-                state["messages"].append(error_message)
+                state.internal_messages = list(state.internal_messages) + [error_message]
         
         return state
     
-    def _validate_results(self, state: AgentState) -> AgentState:
+    def _validate_results(self, state: GraphState) -> GraphState:
         """Validate that results match user intent"""
         
-        if not state.get("current_products"):
+        if not state.current_products:
             return state
         
-        # Create validation prompt
-        user_query = state["messages"][0].content if state["messages"] else ""
-        products = state["current_products"][:5]  # Validate top 5
+        # Create validation prompt - get user query from chat_messages (clean conversation)
+        user_query = state.chat_messages[0].content if state.chat_messages else ""
+        products = state.current_products[:5]  # Validate top 5
         
         validation_prompt = f"""User asked: {user_query}
 
-Found {len(state['current_products'])} products. Here are the top 5:
+Found {len(state.current_products)} products. Here are the top 5:
 {json.dumps(products, indent=2, default=str)}
 
 Do these products match what the user is looking for? 
@@ -363,12 +288,19 @@ Rate the relevance (1-10) and explain if we should:
 Response format: {{"relevance": 8, "action": "show", "reason": "..."}}
 """
         
+        # These messages are for internal LLM validation, NOT part of user conversation
         messages = [
             SystemMessage(content="You are validating search results for relevance."),
             HumanMessage(content=validation_prompt)
         ]
         
+        # Add all LLM request messages to internal_messages for debugging flow
+        state.internal_messages = list(state.internal_messages) + messages
+        
         response = self.llm.invoke(messages)
+        
+        # Add LLM response to internal_messages for debugging flow
+        state.internal_messages = list(state.internal_messages) + [AIMessage(content=f"VALIDATE_RESULTS_LLM_RESPONSE: {response.content}")]
         
         try:
             validation = json.loads(response.content)
@@ -376,31 +308,32 @@ Response format: {{"relevance": 8, "action": "show", "reason": "..."}}
             if validation.get("relevance", 0) < 6:
                 # Low relevance - need to search again or clarify
                 if validation.get("action") == "clarify":
-                    state["next_action"] = "respond"  # Ask for clarification
+                    state.next_action = "respond"  # Ask for clarification
                 else:
-                    state["next_action"] = "search_again"
+                    state.next_action = "search_again"
             else:
                 # Good results - proceed to response
-                state["next_action"] = "respond"
+                state.next_action = "respond"
                 
         except:
             # Default to showing results if validation fails
-            state["next_action"] = "respond"
+            state.next_action = "respond"
         
         return state
     
-    def _generate_response(self, state: AgentState) -> AgentState:
+    def _generate_response(self, state: GraphState) -> GraphState:
         """Generate final response to user"""
         
-        # Build context for response generation
+        # Build context for response generation using clean chat history
+        # SystemMessage is for LLM context, not part of conversation
         messages = [
             SystemMessage(content=self._create_system_prompt()),
-            *state["messages"]
+            *state.chat_messages  # Only user ↔ assistant conversation
         ]
         
         # Add instruction for response format
-        if state.get("current_products"):
-            products = state["current_products"]
+        if state.current_products:
+            products = state.current_products
             response_prompt = f"""Based on the search results, provide a helpful response to the user.
 
 Found {len(products)} products matching their criteria.
@@ -419,67 +352,62 @@ Products data:
             response_prompt = """Provide a helpful response to the user's question.
 Be conversational and suggest how you can help them find products."""
         
+        # This HumanMessage is for internal LLM prompting, NOT part of user conversation
         messages.append(HumanMessage(content=response_prompt))
         
-        response = self.llm.invoke(messages)
-        state["final_answer"] = response.content
+        # Add all LLM request messages to internal_messages for debugging flow
+        state.internal_messages = list(state.internal_messages) + messages
         
-        # Add response to messages
-        state["messages"].append(AIMessage(content=response.content))
+        response = self.llm.invoke(messages)
+        state.final_answer = response.content
+        
+        # Add LLM response to internal_messages for debugging flow
+        state.internal_messages = list(state.internal_messages) + [AIMessage(content=f"GENERATE_RESPONSE_LLM_RESPONSE: {response.content}")]
+        
+        # Add assistant response to chat_messages (this IS part of user conversation)
+        # This is what the user will see as the bot's response
+        state.chat_messages = list(state.chat_messages) + [AIMessage(content=response.content)]
         
         return state
     
-    def _update_memory(self, state: AgentState) -> AgentState:
+    def _update_memory(self, state: GraphState) -> GraphState:
         """Update conversation memory and session data"""
         
-        # Save conversation turn
-        user_message = next((m for m in state["messages"] if isinstance(m, HumanMessage)), None)
+        # Save conversation turn using chat_messages (clean conversation history)
+        # Find the latest user message in chat_messages
+        user_message = None
+        for msg in reversed(state.chat_messages):
+            if isinstance(msg, HumanMessage):
+                user_message = msg
+                break
+        
         if user_message:
             self.memory.add_message(user_message.content, "user")
         
-        if state.get("final_answer"):
-            self.memory.add_message(state["final_answer"], "assistant")
+        # Save assistant response (final_answer) to memory
+        if state.final_answer:
+            self.memory.add_message(state.final_answer, "assistant")
         
-        # Update session data
-        session_data = {
-            "last_active": datetime.now().isoformat(),
-            "search_history": state.get("search_history", []),
-            "viewed_products": state.get("current_products", [])[:10],  # Keep last 10
-            "user_context": state.get("user_context", {})
-        }
-        
+        # Update session last active time
         self.session_manager.update_session(
             self.session_id,
             self.tenant_id,
-            session_data
+            {"last_active": datetime.now().isoformat()}
         )
         
         return state
     
-    async def chat(self, message: str) -> str:
+    async def chat(self, initial_state: GraphState) -> str:
         """
-        Main chat interface
+        Main chat interface - expects initial_state with context already loaded
         
         Args:
-            message: User's message
+            initial_state: GraphState with messages including conversation history
             
         Returns:
             Agent's response
         """
-        print(f"\n🤖 AGENT: Starting chat workflow for message: '{message}'")
-        
-        # Create initial state
-        initial_state = AgentState(
-            messages=[HumanMessage(content=message)],
-            session_id=self.session_id,
-            tenant_id=self.tenant_id,
-            user_context={},
-            current_products=[],
-            search_history=[],
-            next_action=None,
-            tool_params=None,
-            final_answer=None
-        )
+        print(f"\n🤖 AGENT: Starting chat workflow with {len(initial_state.chat_messages)} chat messages and {len(initial_state.internal_messages)} internal messages")
         
         print(f"🔄 AGENT: Running LangGraph workflow...")
         
@@ -490,9 +418,19 @@ Be conversational and suggest how you can help them find products."""
         }
         final_state = await self.graph.ainvoke(initial_state, config)
         
-        print(f"✅ AGENT: Workflow completed. Final answer exists: {bool(final_state.get('final_answer'))}")
+        print(f"✅ AGENT: Workflow completed. Final answer exists: {bool(final_state.final_answer)}")
         
-        return final_state.get("final_answer", "I'm sorry, I couldn't process your request.")
+        # Print all internal messages to see the complete LLM interaction flow
+        print(f"\n🔍 INTERNAL MESSAGE FLOW ({len(final_state.internal_messages)} messages):")
+        print("=" * 80)
+        for i, msg in enumerate(final_state.internal_messages, 1):
+            msg_type = type(msg).__name__
+            content_preview = msg.content[:200] + "..." if len(msg.content) > 200 else msg.content
+            print(f"{i:2d}. [{msg_type}] {content_preview}")
+            print("-" * 40)
+        print("=" * 80)
+        
+        return final_state.final_answer or "I'm sorry, I couldn't process your request."
     
     def reset_session(self):
         """Reset the conversation session"""

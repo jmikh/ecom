@@ -87,6 +87,7 @@ async def test_direct_tools():
 def main():
     """Main entry point"""
     import sys
+    from src.database.database_pool import get_database, close_global_database
     
     print("""
 ╔════════════════════════════════════════╗
@@ -94,12 +95,25 @@ def main():
 ╚════════════════════════════════════════╝
     """)
     
-    if len(sys.argv) > 1 and sys.argv[1] == "--tools":
-        # Test tools directly
-        asyncio.run(test_direct_tools())
-    else:
-        # Test full agent
-        asyncio.run(test_agent())
+    # Initialize database connection pool
+    print("🚀 Initializing database connection pool...")
+    try:
+        db = get_database()
+        print("✅ Database connection established")
+    except Exception as e:
+        print(f"❌ Failed to initialize database pool - tests may fail: {e}")
+        # Continue anyway - let tests show what fails
+    
+    try:
+        if len(sys.argv) > 1 and sys.argv[1] == "--tools":
+            # Test tools directly
+            asyncio.run(test_direct_tools())
+        else:
+            # Test full agent
+            asyncio.run(test_agent())
+    finally:
+        # Clean up database pool
+        close_global_database()
 
 
 if __name__ == "__main__":

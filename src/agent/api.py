@@ -332,6 +332,29 @@ async def shutdown_event():
     agent_cache.clear()
 
 
+@app.on_event("startup")
+async def startup_event():
+    """Initialize database connection pool on startup"""
+    from ..database.database_pool import get_database
+    
+    print("🚀 Starting Product Agent API...")
+    try:
+        db = get_database()
+        print("✅ Database pool initialized successfully")
+    except Exception as e:
+        print(f"❌ Failed to initialize database pool: {e}")
+        # Don't exit - let the app start but database operations will fail gracefully
+
+
+@app.on_event("shutdown") 
+async def shutdown_event():
+    """Close database connection pool on shutdown"""
+    from ..database.database_pool import close_global_database
+    
+    print("🛑 Shutting down Product Agent API...")
+    close_global_database()
+
+
 if __name__ == "__main__":
     import uvicorn
     uvicorn.run(app, host="0.0.0.0", port=8000)

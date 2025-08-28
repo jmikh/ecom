@@ -50,6 +50,7 @@ def setup_database():
         CREATE TABLE IF NOT EXISTS tenants (
             tenant_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
             name TEXT NOT NULL,
+            description TEXT,
             created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
             updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
         )
@@ -77,6 +78,10 @@ def setup_database():
             max_price NUMERIC(10,2),
             has_discount BOOLEAN DEFAULT FALSE,
             options JSONB DEFAULT '{}'::jsonb,
+            
+            -- Embedding fields
+            embedding_json JSONB,
+            embedding vector(1536),
             
             -- Timestamps
             created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
@@ -138,39 +143,19 @@ def setup_database():
         )
     """)
     
-    cursor.execute("""
-        CREATE TABLE IF NOT EXISTS product_embedding_text (
-            product_id BIGINT REFERENCES products(id) ON DELETE CASCADE,
-            tenant_id UUID NOT NULL REFERENCES tenants(tenant_id) ON DELETE CASCADE,
-            embedding_text TEXT NOT NULL,
-            created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
-            PRIMARY KEY (tenant_id, product_id)
-        )
-    """)
-    
-    cursor.execute("""
-        CREATE TABLE IF NOT EXISTS product_embeddings (
-            product_id BIGINT REFERENCES products(id) ON DELETE CASCADE,
-            tenant_id UUID NOT NULL REFERENCES tenants(tenant_id) ON DELETE CASCADE,
-            embedding vector(1536),
-            updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
-            PRIMARY KEY (tenant_id, product_id)
-        )
-    """)
+    # Embedding tables removed - now part of products table
     
     # Enable Row Level Security for multi-tenant isolation
     cursor.execute("ALTER TABLE products ENABLE ROW LEVEL SECURITY")
     cursor.execute("ALTER TABLE product_variants ENABLE ROW LEVEL SECURITY")
     cursor.execute("ALTER TABLE product_images ENABLE ROW LEVEL SECURITY")
-    cursor.execute("ALTER TABLE product_embedding_text ENABLE ROW LEVEL SECURITY")
-    cursor.execute("ALTER TABLE product_embeddings ENABLE ROW LEVEL SECURITY")
+    # Row level security for embedding tables removed - now part of products table
     
     # Drop existing policies if exists and recreate (to handle schema changes)
     cursor.execute("DROP POLICY IF EXISTS tenant_isolation ON products")
     cursor.execute("DROP POLICY IF EXISTS tenant_isolation ON product_variants")
     cursor.execute("DROP POLICY IF EXISTS tenant_isolation ON product_images")
-    cursor.execute("DROP POLICY IF EXISTS tenant_isolation ON product_embedding_text")
-    cursor.execute("DROP POLICY IF EXISTS tenant_isolation ON product_embeddings")
+    # Policies for embedding tables removed - now part of products table
     
     cursor.execute("""
         CREATE POLICY tenant_isolation ON products
@@ -190,22 +175,12 @@ def setup_database():
         WITH CHECK (tenant_id = current_setting('app.tenant_id', true)::uuid)
     """)
     
-    cursor.execute("""
-        CREATE POLICY tenant_isolation ON product_embedding_text
-        USING (tenant_id = current_setting('app.tenant_id', true)::uuid)
-        WITH CHECK (tenant_id = current_setting('app.tenant_id', true)::uuid)
-    """)
+    # Policies for embedding tables removed - now part of products table
     
+    # Create ANN index for vector similarity search on products table
     cursor.execute("""
-        CREATE POLICY tenant_isolation ON product_embeddings
-        USING (tenant_id = current_setting('app.tenant_id', true)::uuid)
-        WITH CHECK (tenant_id = current_setting('app.tenant_id', true)::uuid)
-    """)
-    
-    # Create ANN index for vector similarity search
-    cursor.execute("""
-        CREATE INDEX IF NOT EXISTS idx_product_embeddings_vector 
-        ON product_embeddings 
+        CREATE INDEX IF NOT EXISTS idx_products_embedding_vector 
+        ON products 
         USING ivfflat (embedding vector_cosine_ops)
         WITH (lists = 100)
     """)
@@ -237,13 +212,7 @@ def setup_database():
     cursor.execute("CREATE INDEX IF NOT EXISTS idx_images_shopify_image_id ON product_images (shopify_image_id)")
     cursor.execute("CREATE INDEX IF NOT EXISTS idx_images_shopify_product_id ON product_images (shopify_product_id)")
     
-    # Create essential indexes for product_embedding_text table
-    cursor.execute("CREATE INDEX IF NOT EXISTS idx_embedding_text_tenant ON product_embedding_text (tenant_id)")
-    cursor.execute("CREATE INDEX IF NOT EXISTS idx_embedding_text_product_id ON product_embedding_text (product_id)")
-    
-    # Create essential indexes for product_embeddings table
-    cursor.execute("CREATE INDEX IF NOT EXISTS idx_embeddings_tenant ON product_embeddings (tenant_id)")
-    cursor.execute("CREATE INDEX IF NOT EXISTS idx_embeddings_product_id ON product_embeddings (product_id)")
+    # Indexes for embedding columns now part of products table
     
     conn.commit()
     cursor.close()

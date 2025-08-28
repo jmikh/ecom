@@ -76,8 +76,8 @@ class ProductInserter:
         text = re.sub(r'\s+', ' ', text)
         return text.strip()
     
-    def create_embedding_content(self, product: Dict[str, Any]) -> str:
-        """Create a JSON string containing the fields to embed for a product"""
+    def create_embedding_json(self, product: Dict[str, Any]) -> Dict[str, Any]:
+        """Create a JSON object containing the fields to embed for a product"""
         # Extract options data
         options_data = {}
         raw_options = product.get('options', [])
@@ -100,7 +100,7 @@ class ProductInserter:
             "description": cleaned_body
         }
         
-        return json.dumps(embedding_content, ensure_ascii=False)
+        return embedding_content
     
     def parse_timestamp(self, timestamp_str: Optional[str]) -> Optional[datetime]:
         """Parse Shopify timestamp string to datetime"""
@@ -157,19 +157,20 @@ class ProductInserter:
     def insert_product(self, product: Dict[str, Any]) -> Optional[int]:
         """Insert a single product into the products table"""
         computed_fields = self.compute_product_fields(product)
+        embedding_json = self.create_embedding_json(product)
         
         # Delete existing product if it exists (CASCADE will delete variants and images)
         delete_query = "DELETE FROM products WHERE tenant_id = %s AND shopify_id = %s"
         self.cursor.execute(delete_query, (self.tenant_id, product.get('id')))
         
-        # Insert fresh
+        # Insert fresh (including embedding_json, but not embedding vector yet)
         insert_query = """
             INSERT INTO products (
                 tenant_id, shopify_id, handle, title, body_html, vendor, product_type, tags, status,
                 published_at, template_suffix, published_scope, admin_graphql_api_id, min_price,
-                max_price, has_discount, options, created_at, updated_at
+                max_price, has_discount, options, embedding_json, created_at, updated_at
             ) VALUES (
-                %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s
+                %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s
             )
             RETURNING id
         """
@@ -192,6 +193,7 @@ class ProductInserter:
             computed_fields['max_price'],
             computed_fields['has_discount'],
             Json(json.loads(computed_fields['options'])),
+            Json(embedding_json),  # Add embedding_json as JSONB
             self.parse_timestamp(product.get('created_at')),
             self.parse_timestamp(product.get('updated_at'))
         )
@@ -316,25 +318,7 @@ class ProductInserter:
             self.conn.rollback()
             raise Exception(f"Variant insertion failed - halting ingestion") from e
     
-    def insert_embedding_text(self, product_db_id: int, product: Dict[str, Any]):
-        """Insert embedding text for a product (for debugging)"""
-        embedding_text = self.create_embedding_content(product)
-        
-        insert_query = """
-            INSERT INTO product_embedding_text (
-                product_id, tenant_id, embedding_text, created_at
-            ) VALUES (%s, %s, %s, %s)
-        """
-        
-        try:
-            self.cursor.execute(insert_query, (
-                product_db_id, self.tenant_id, embedding_text, datetime.now()
-            ))
-        except psycopg2.Error as e:
-            print(f"ERROR: Failed to insert embedding text for product {product.get('id')}")
-            print(f"Database error: {e}")
-            self.conn.rollback()
-            raise Exception(f"Embedding text insertion failed - halting ingestion") from e
+    # Removed - embedding_text now part of products table
     
     def insert_products(self, products: List[Dict[str, Any]]):
         """Insert a list of Shopify products"""
@@ -355,8 +339,7 @@ class ProductInserter:
                 image_map = self.insert_images(product_db_id, product)
                 # Then insert variants with the image mapping
                 self.insert_variants(product_db_id, product, image_map)
-                # Insert embedding text during product ingestion
-                self.insert_embedding_text(product_db_id, product)
+                # Embedding text already inserted with product
                 successful_products += 1
                 
                 if i % 10 == 0:

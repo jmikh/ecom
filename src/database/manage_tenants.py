@@ -39,12 +39,13 @@ class TenantManager:
         if self.conn:
             self.conn.close()
     
-    def create_tenant(self, name: str, tenant_id: Optional[str] = None) -> str:
+    def create_tenant(self, name: str, description: Optional[str] = None, tenant_id: Optional[str] = None) -> str:
         """
         Create a new tenant
         
         Args:
             name: Human-readable name for the tenant
+            description: Optional description of the ecommerce company
             tenant_id: Optional UUID string, will generate if not provided
             
         Returns:
@@ -69,12 +70,12 @@ class TenantManager:
         
         # Insert new tenant
         insert_query = """
-            INSERT INTO tenants (tenant_id, name) 
-            VALUES (%s, %s)
+            INSERT INTO tenants (tenant_id, name, description) 
+            VALUES (%s, %s, %s)
         """
         
         try:
-            self.cursor.execute(insert_query, (tenant_id, name))
+            self.cursor.execute(insert_query, (tenant_id, name, description))
             self.conn.commit()
             print(f"✓ Created tenant: {name} ({tenant_id})")
             return tenant_id
@@ -86,7 +87,7 @@ class TenantManager:
     
     def list_tenants(self):
         """List all tenants"""
-        query = "SELECT tenant_id, name, created_at FROM tenants ORDER BY created_at"
+        query = "SELECT tenant_id, name, description, created_at FROM tenants ORDER BY created_at"
         self.cursor.execute(query)
         tenants = self.cursor.fetchall()
         
@@ -94,11 +95,12 @@ class TenantManager:
             print("No tenants found")
             return
         
-        print(f"{'Tenant ID':<40} {'Name':<20} {'Created'}")
-        print("-" * 80)
-        for tenant_id, name, created_at in tenants:
+        print(f"{'Tenant ID':<40} {'Name':<20} {'Description':<30} {'Created'}")
+        print("-" * 110)
+        for tenant_id, name, description, created_at in tenants:
             created_str = created_at.strftime('%Y-%m-%d %H:%M:%S') if created_at else 'Unknown'
-            print(f"{tenant_id:<40} {name:<20} {created_str}")
+            desc_str = (description or '')[:27] + '...' if description and len(description) > 30 else (description or '')
+            print(f"{tenant_id:<40} {name:<20} {desc_str:<30} {created_str}")
     
     def delete_tenant(self, tenant_id: str, force: bool = False):
         """
@@ -163,6 +165,7 @@ def main():
     # Create tenant command
     create_parser = subparsers.add_parser('create', help='Create a new tenant')
     create_parser.add_argument('name', help='Human-readable name for the tenant')
+    create_parser.add_argument('--description', help='Optional description of the ecommerce company')
     create_parser.add_argument('--tenant-id', help='Optional UUID for tenant (will generate if not provided)')
     
     # List tenants command
@@ -185,7 +188,7 @@ def main():
         manager.connect()
         
         if args.command == 'create':
-            tenant_id = manager.create_tenant(args.name, args.tenant_id)
+            tenant_id = manager.create_tenant(args.name, getattr(args, 'description', None), args.tenant_id)
             
         elif args.command == 'list':
             manager.list_tenants()

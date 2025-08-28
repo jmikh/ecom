@@ -86,13 +86,14 @@ class EmbeddingGenerator:
             return [None] * len(texts)
     
     def get_products_without_embeddings(self) -> List[tuple]:
-        """Get products that have embedding text but no embeddings"""
+        """Get products that have embedding JSON but no embeddings"""
         query = """
-            SELECT pet.product_id, pet.embedding_text
-            FROM product_embedding_text pet
-            LEFT JOIN product_embeddings pe ON pet.product_id = pe.product_id AND pet.tenant_id = pe.tenant_id
-            WHERE pet.tenant_id = %s AND pe.product_id IS NULL
-            ORDER BY pet.product_id
+            SELECT id, embedding_json
+            FROM products
+            WHERE tenant_id = %s 
+              AND embedding_json IS NOT NULL 
+              AND embedding IS NULL
+            ORDER BY id
         """
         
         self.cursor.execute(query, (self.tenant_id,))
@@ -108,45 +109,45 @@ class EmbeddingGenerator:
         
         for i in range(0, len(product_texts), batch_size):
             batch = product_texts[i:i + batch_size]
-            batch_texts = [row[1] for row in batch]  # embedding_text
+            batch_jsons = [row[1] for row in batch]  # embedding_json
             batch_product_ids = [row[0] for row in batch]  # product_id
+            
+            # Convert JSON objects to text strings for embedding
+            import json
+            batch_texts = [json.dumps(json_obj, ensure_ascii=False) if json_obj else "" for json_obj in batch_jsons]
             
             # Generate embeddings for the batch
             print(f"  Generating embeddings for batch {i//batch_size + 1} ({len(batch_texts)} products)...")
             embeddings = self.generate_embeddings_batch(batch_texts)
             
-            # Insert embeddings
-            insert_query = """
-                INSERT INTO product_embeddings (
-                    product_id,
-                    tenant_id,
-                    embedding,
-                    updated_at
-                ) VALUES (%s, %s, %s, %s)
+            # Update products with embeddings
+            update_query = """
+                UPDATE products
+                SET embedding = %s
+                WHERE id = %s AND tenant_id = %s
             """
             
             embedding_values = []
             for product_id, embedding_vector in zip(batch_product_ids, embeddings):
                 if embedding_vector is not None:
                     embedding_values.append((
-                        product_id,
-                        self.tenant_id,
                         embedding_vector,
-                        datetime.now()
+                        product_id,
+                        self.tenant_id
                     ))
                 else:
                     print(f"Warning: Skipping embedding for product ID {product_id} - generation failed")
             
             if embedding_values:
                 try:
-                    execute_batch(self.cursor, insert_query, embedding_values)
-                    print(f"  Inserted {len(embedding_values)} embeddings")
+                    execute_batch(self.cursor, update_query, embedding_values)
+                    print(f"  Updated {len(embedding_values)} product embeddings")
                     self.conn.commit()
                 except psycopg2.Error as e:
-                    print(f"ERROR: Failed to insert batch embeddings")
+                    print(f"ERROR: Failed to update batch embeddings")
                     print(f"Database error: {e}")
                     self.conn.rollback()
-                    raise Exception(f"Batch embedding insertion failed") from e
+                    raise Exception(f"Batch embedding update failed") from e
             
             # Add a small delay between batches to be respectful to the API
             if i + batch_size < len(product_texts):
@@ -169,16 +170,16 @@ class EmbeddingGenerator:
         self.insert_embeddings_batch(product_texts, batch_size)
     
     def regenerate_all_embeddings(self, batch_size: int = 100):
-        """Regenerate embeddings for ALL products (delete existing first)"""
+        """Regenerate embeddings for ALL products (clear existing first)"""
         print("Regenerating ALL embeddings...")
         
-        # Delete all existing embeddings for this tenant
-        delete_query = "DELETE FROM product_embeddings WHERE tenant_id = %s"
-        self.cursor.execute(delete_query, (self.tenant_id,))
-        deleted_count = self.cursor.rowcount
+        # Clear existing embeddings for this tenant
+        clear_query = "UPDATE products SET embedding = NULL WHERE tenant_id = %s"
+        self.cursor.execute(clear_query, (self.tenant_id,))
+        cleared_count = self.cursor.rowcount
         self.conn.commit()
         
-        print(f"Deleted {deleted_count} existing embeddings")
+        print(f"Cleared {cleared_count} existing embeddings")
         
         # Now generate embeddings for all products
         self.generate_all_embeddings(batch_size)

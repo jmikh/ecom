@@ -1,5 +1,5 @@
 """
-Memory and Session Management for Product Agent
+Memory Management for Product Agent - Conversation History Only
 """
 
 import json
@@ -78,7 +78,7 @@ class ConversationMemory:
 
 class SessionManager:
     """
-    Manages user sessions and context
+    Manages basic session data for conversation continuity
     """
     
     def __init__(self):
@@ -92,19 +92,13 @@ class SessionManager:
         except Exception as e:
             raise ConnectionError(f"Redis connection error: {e}")
     
-    def create_session(self, session_id: str, tenant_id: str, user_data: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
-        """Create a new session"""
+    def create_session(self, session_id: str, tenant_id: str) -> Dict[str, Any]:
+        """Create a new session with minimal data"""
         session_data = {
             "session_id": session_id,
             "tenant_id": tenant_id,
             "created_at": datetime.now().isoformat(),
-            "last_active": datetime.now().isoformat(),
-            "user_preferences": {},
-            "viewed_products": [],
-            "search_history": [],
-            "cart_items": [],
-            "recommendations": [],
-            **(user_data or {})
+            "last_active": datetime.now().isoformat()
         }
         
         key = f"session:{tenant_id}:{session_id}"
@@ -135,14 +129,13 @@ class SessionManager:
         return None
     
     def update_session(self, session_id: str, tenant_id: str, updates: Dict[str, Any]):
-        """Update session data"""
+        """Update session data (mainly for last_active timestamp)"""
         key = f"session:{tenant_id}:{session_id}"
         
         # Get existing data
         existing = self.get_session_data(session_id, tenant_id)
         if existing:
-            # Merge updates
-            existing.update(updates)
+            # Only update last_active and any minimal session data
             existing["last_active"] = datetime.now().isoformat()
             
             # Save back
@@ -152,57 +145,11 @@ class SessionManager:
                 json.dumps(existing)
             )
         else:
-            # Create new session with updates
-            self.create_session(session_id, tenant_id, updates)
-    
-    def add_viewed_product(self, session_id: str, tenant_id: str, product: Dict[str, Any]):
-        """Add a product to viewed history"""
-        session_data = self.get_session_data(session_id, tenant_id)
-        
-        if session_data:
-            viewed = session_data.get("viewed_products", [])
-            
-            # Add product (avoid duplicates)
-            product_id = product.get("id")
-            if product_id and not any(p.get("id") == product_id for p in viewed):
-                viewed.append({
-                    "id": product_id,
-                    "title": product.get("title"),
-                    "price": product.get("min_price"),
-                    "viewed_at": datetime.now().isoformat()
-                })
-                
-                # Keep last 50 viewed products
-                viewed = viewed[-50:]
-                
-                self.update_session(session_id, tenant_id, {"viewed_products": viewed})
-    
-    def get_user_preferences(self, session_id: str, tenant_id: str) -> Dict[str, Any]:
-        """Get user preferences from session"""
-        session_data = self.get_session_data(session_id, tenant_id)
-        
-        if session_data:
-            # Analyze viewed products and searches to infer preferences
-            preferences = session_data.get("user_preferences", {})
-            
-            # Analyze viewed products
-            viewed_products = session_data.get("viewed_products", [])
-            if viewed_products:
-                # Extract common patterns
-                # This is a simplified version - could be much more sophisticated
-                preferences["recently_viewed_count"] = len(viewed_products)
-            
-            # Analyze search history
-            search_history = session_data.get("search_history", [])
-            if search_history:
-                preferences["recent_searches"] = [s.get("query") for s in search_history[-5:]]
-            
-            return preferences
-        
-        return {}
+            # Create new session
+            self.create_session(session_id, tenant_id)
     
     def clear_session(self, session_id: str, tenant_id: str):
-        """Clear session data"""
+        """Clear session data and conversation history"""
         key = f"session:{tenant_id}:{session_id}"
         conversation_key = f"conversation:{tenant_id}:{session_id}"
         
@@ -220,45 +167,3 @@ class SessionManager:
             active_sessions.append(session_id)
         
         return active_sessions
-    
-    def cleanup_expired_sessions(self, tenant_id: str):
-        """Clean up expired sessions (this is handled by Redis TTL, but kept for manual cleanup)"""
-        # Redis handles expiry automatically with TTL
-        # This method is for any additional cleanup logic if needed
-        pass
-
-
-class ProductRecommendationCache:
-    """
-    Cache for product recommendations to improve performance
-    """
-    
-    def __init__(self):
-        self.redis_client = redis.from_url(config.get_redis_url())
-        self.cache_ttl = 3600  # 1 hour
-    
-    def get_recommendations(self, tenant_id: str, query_hash: str) -> Optional[List[Dict[str, Any]]]:
-        """Get cached recommendations"""
-        key = f"recommendations:{tenant_id}:{query_hash}"
-        data = self.redis_client.get(key)
-        
-        if data:
-            return json.loads(data)
-        return None
-    
-    def cache_recommendations(self, tenant_id: str, query_hash: str, products: List[Dict[str, Any]]):
-        """Cache product recommendations"""
-        key = f"recommendations:{tenant_id}:{query_hash}"
-        self.redis_client.setex(
-            key,
-            self.cache_ttl,
-            json.dumps(products)
-        )
-    
-    def invalidate_tenant_cache(self, tenant_id: str):
-        """Invalidate all caches for a tenant (useful after data updates)"""
-        pattern = f"recommendations:{tenant_id}:*"
-        keys = self.redis_client.keys(pattern)
-        
-        if keys:
-            self.redis_client.delete(*keys)

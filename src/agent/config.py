@@ -40,7 +40,6 @@ class AgentConfig:
     # Agent Configuration
     max_iterations: int = int(os.getenv("AGENT_MAX_ITERATIONS", "10"))
     max_search_results: int = int(os.getenv("MAX_SEARCH_RESULTS", "20"))
-    similarity_threshold: float = float(os.getenv("SIMILARITY_THRESHOLD", "0.7"))
     
     # Session Configuration
     session_ttl_seconds: int = int(os.getenv("SESSION_TTL_SECONDS", "3600"))  # 1 hour
