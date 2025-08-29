@@ -7,6 +7,7 @@ from langsmith import traceable
 
 from src.agent.graph_state import GraphState
 from src.agent.config import config
+from src.database import get_database
 
 class SqlFilter(BaseModel):
     product_type: Optional[str] = None
@@ -32,7 +33,26 @@ class ProductsFilter(BaseModel):
         le=25,
         description="Number of results to return (default 5, max 25), don't change unless the user clearly specifies a number"
     )
-    
+
+
+@traceable(name="fetch_product_types")
+def fetch_product_types(tenant_id: str) -> List[str]:
+    """Fetch all unique product_type values for a given tenant from the database"""
+    try:
+        db = get_database()
+        query = """
+            SELECT DISTINCT product_type 
+            FROM products 
+            WHERE product_type IS NOT NULL 
+            ORDER BY product_type
+        """
+        results = db.run_read(query, (), tenant_id=tenant_id)
+        return [row['product_type'] for row in results]
+    except Exception as e:
+        print(f"❌ Error fetching product types: {e}")
+        return []
+
+
 # Global node functions for the graph workflow
 def get_product_filters_node(state: GraphState) -> GraphState:
     """Node: Extract product filters from conversation history"""
@@ -41,6 +61,9 @@ def get_product_filters_node(state: GraphState) -> GraphState:
     print(f"{'='*60}")
     
     try:
+        # Fetch available product types for this tenant
+        available_product_types = fetch_product_types(state.tenant_id)
+        
         # Create LLM instance with structured output using function calling for flexibility
         llm = ChatOpenAI(
             model=config.openai_model,
@@ -48,17 +71,18 @@ def get_product_filters_node(state: GraphState) -> GraphState:
             openai_api_key=config.openai_api_key
         ).with_structured_output(ProductsFilter)
         
-        # Create system message
-        system_message = SystemMessage(content="""
+        # Create system message with available product types
+        product_types_list = ", ".join(available_product_types) if available_product_types else "No product types available"
+        system_message = SystemMessage(content=f"""
 You are a product filter extraction agent for an e-commerce store.
 Your job is to analyze conversation history and extract relevant product search filters.
 
 Extract filters for:
-- product_type: Category like "Shoes", "Clothing", "Electronics", etc.
+- product_type: MUST be one of these exact values from the store: {product_types_list}
+  If the user mentions a category, map it to the closest matching value from the list above.
+  If no close match exists, set to null.
 - min_price/max_price: Price range if mentioned
-- vendor: Brand names like "Nike", "Apple", etc.
 - has_discount: If user wants discounted items
-- tags: Keywords like "waterproof", "wireless", etc.
 
 Also create a semantic_query that captures the essence of what the user is looking for.
 Set k (number of results) only if user specifies a specific number, otherwise keep default of 5.
