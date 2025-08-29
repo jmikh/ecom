@@ -72,47 +72,11 @@ class AgentConfig:
         print(f"   • Project: {self.langsmith_project}")
         
         if verbose_mode:
-            # Console verbose mode - no cloud tracing
-            os.environ["LANGCHAIN_VERBOSE"] = "true"
-            os.environ["LANGCHAIN_TRACING_V2"] = "false"
-            # Ensure no cloud endpoints
-            os.environ.pop("LANGCHAIN_API_KEY", None)
-            os.environ.pop("LANGCHAIN_ENDPOINT", None)
-            
             print(f"\n🖥️ CONSOLE TRACING ENABLED")
-            print(f"   📍 Destination: LOCAL CONSOLE ONLY")
-            print(f"   📝 LLM calls, tool executions, and agent decisions will print below")
-            print(f"   🚫 NO data sent to LangSmith cloud servers")
-            
-        elif has_api_key and tracing_enabled:
-            # Cloud tracing with API key
-            os.environ["LANGCHAIN_TRACING_V2"] = "true"
-            os.environ["LANGCHAIN_ENDPOINT"] = "https://api.smith.langchain.com"
-            os.environ["LANGCHAIN_API_KEY"] = self.langsmith_api_key
-            os.environ["LANGCHAIN_PROJECT"] = self.langsmith_project
-            os.environ["LANGCHAIN_CALLBACKS_BACKGROUND"] = "true"
-            os.environ["LANGCHAIN_VERBOSE"] = "false"  # Disable console verbose when using cloud
-            
-            print(f"\n☁️ LANGSMITH CLOUD TRACING ENABLED")
-            print(f"   📍 Destination: LangSmith Cloud Servers")
-            print(f"   🌐 URL: https://smith.langchain.com/o/{self.langsmith_project}")
-            print(f"   📡 All traces will be uploaded to LangSmith dashboard")
-            
-        else:
-            # No tracing
-            os.environ["LANGCHAIN_TRACING_V2"] = "false"
-            os.environ["LANGCHAIN_VERBOSE"] = "false"
-            os.environ.pop("LANGCHAIN_API_KEY", None)
-            os.environ.pop("LANGCHAIN_ENDPOINT", None)
-            
-            print(f"\n❌ TRACING DISABLED")
-            print(f"   📍 Destination: NONE")
-            print(f"   🚫 No tracing output (neither console nor cloud)")
-            if not has_api_key and not verbose_mode:
-                print(f"   💡 To enable: Add LANGSMITH_API_KEY for cloud OR LANGCHAIN_VERBOSE=true for console")
-        
-        print(f"{'='*70}")
 
+        if has_api_key and tracing_enabled:
+            print(f"\n📡 All traces will be uploaded to LangSmith dashboard")
+            
 
 # Global config instance
 config = AgentConfig()
