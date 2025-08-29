@@ -4,7 +4,7 @@ Builds the LangGraph workflow that handles intent classification and routing
 """
 
 from langgraph.graph import StateGraph, END
-from src.agent import classify_intent_node, get_product_filters_node, fetch_candidate_products_node, error_node
+from src.agent import classify_intent_node, get_product_filters_node, fetch_candidate_products_node, validate_recommended_products_node, error_node
 from src.agent.graph_state import GraphState, UserIntent
 
 # Global compiled graph - initialized once
@@ -25,6 +25,7 @@ def get_main_graph() -> StateGraph:
     # Add nodes for each intent workflow
     graph.add_node("get_product_filters_node", get_product_filters_node.get_product_filters_node)
     graph.add_node("fetch_candidate_products_node", fetch_candidate_products_node.fetch_candidate_products_node)
+    graph.add_node("validate_recommended_products_node", validate_recommended_products_node.validate_recommended_products_node)
     graph.add_node("product_inquiry_workflow", lambda state: print(f"\n{'='*60}\n📦 PRODUCT_INQUIRY_WORKFLOW: Processing product inquiry\n{'='*60}") or state)
     graph.add_node("store_brand_workflow", lambda state: print(f"\n{'='*60}\n🏪 STORE_BRAND_WORKFLOW: Processing store/brand question\n{'='*60}") or state)
     graph.add_node("unrelated_workflow", lambda state: print(f"\n{'='*60}\n🤷 UNRELATED_WORKFLOW: Processing unrelated query\n{'='*60}") or state)
@@ -67,7 +68,8 @@ def get_main_graph() -> StateGraph:
 
     # Add edges from workflow nodes to END
     graph.add_conditional_edges("get_product_filters_node", has_error, {True: "error", False: "fetch_candidate_products_node"})
-    graph.add_conditional_edges("fetch_candidate_products_node", has_error, {True: "error",False: END})
+    graph.add_conditional_edges("fetch_candidate_products_node", has_error, {True: "error", False: "validate_recommended_products_node"})
+    graph.add_conditional_edges("validate_recommended_products_node", has_error, {True: "error", False: END})
     graph.add_edge("product_inquiry_workflow", END)
     graph.add_edge("store_brand_workflow", END)
     graph.add_edge("unrelated_workflow", END)

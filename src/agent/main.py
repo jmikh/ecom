@@ -53,6 +53,7 @@ async def process_user_query(
     # for message in messages:
     #     print(str(message) + "\n")
     
+    print("FINAL ANSWER:\n")
     return final_state.final_answer
 
 
