@@ -5,7 +5,7 @@ Test script for LangGraph Product Agent
 
 import asyncio
 from src.agent import ProductAgent
-from src.agent.memory import SessionManager
+from src.database.redis_manager import SessionManager
 
 async def test_agent():
     """Test the agent with various queries"""
