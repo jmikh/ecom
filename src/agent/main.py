@@ -1,107 +1,100 @@
+#!/usr/bin/env python3
 """
-Main entry point for the Mission Control Agent
+Simple chat server for terminal interaction
 """
 
-import uuid
 import asyncio
-from typing import Dict, Any, Optional
-from datetime import datetime
+import uuid
+from typing import Optional
+import json
 
-from src.agent.classify_intent_node import GraphState
 from src.agent.main_graph import get_main_graph
-from src.database import ConversationMemory, get_database
+from src.agent.graph_state import GraphState
+from src.database.redis_manager import SessionManager, ConversationMemory
+from src.database import get_database
+from langchain_core.messages import HumanMessage
 
 
-async def process_user_query(
-    user_message: str, 
-    tenant_id: str, 
-    session_id: Optional[str] = None,
-) -> Dict[str, Any]:
-    """
-    Process a user query through the mission control workflow
-    
-    Args:
-        user_message: The user's message
-        tenant_id: Tenant ID for multi-tenant isolation  
-        session_id: Optional session ID for conversation continuity
+class ChatServer:
+    def __init__(self):
+        self.session_id: Optional[str] = None
+        self.tenant_id: str = "6b028cbb-512d-4538-a3b1-71bc40f49ed1"  # Default tenant
+        self.session_manager = SessionManager()
+        self.memory: Optional[ConversationMemory] = None
+        self.graph = get_main_graph()
+        self.db = get_database()
         
-    Returns:
-        Complete routing decision with classification and workflow details
-    """
-    if not session_id:
-        session_id = str(uuid.uuid4())
-
-    memory = ConversationMemory(session_id, tenant_id)
-    memory.add_message(user_message, "user")
-
-    initial_state = GraphState(
-        session_id=session_id,
-        tenant_id=tenant_id,
-    )
-    # Get compiled graph and run
-    graph = get_main_graph()
+    def create_session(self) -> str:
+        self.session_id = str(uuid.uuid4())
+        self.session_manager.create_or_fetch_session(self.session_id, self.tenant_id)
+        self.memory = ConversationMemory(self.session_id, self.tenant_id)
+        print(f"Session created: {self.session_id}")
+        return self.session_id
     
-    final_state_dict = await graph.ainvoke(initial_state)
-    
-    # Reconstruct GraphState from dictionary
-    final_state = GraphState.model_validate(final_state_dict)
-    
-    # Extract intent decision from final state
-    # intent_decision = final_state.intent_decision
-    # messages = list(final_state.internal_messages)
-    # print(f"Found {len(messages)} internal messages")
-    # for message in messages:
-    #     print(str(message) + "\n")
-    
-    print("FINAL ANSWER:\n")
-    return final_state.final_answer
-
-
-# Example usage and testing
-if __name__ == "__main__":
-    # Global variable for database instance cleanup
-    _db_instance = None
-    
-    def main():
-        # Initialize database connection pool
-        print("🚀 Starting Mission Control Agent...")
-        try:
-            global _db_instance
-            _db_instance = get_database()
-            print("✅ Database connection established")
-        except Exception as e:
-            print(f"❌ Failed to initialize database - continuing anyway: {e}")
-            _db_instance = None
+    async def process_message(self, message: str) -> str:
+        # Add user message to memory
+        self.memory.add_message(message, "user")
         
-        async def test_mission_control():
-            # Test the new global function approach
-            tenant_id = "6b028cbb-512d-4538-a3b1-71bc40f49ed1"
-            
-            # Test queries
-            test_queries = [
-                "Show me some running shoes under $100",
-            ]
-            
-            print("Mission Control - Intent Classification Test (Global Functions)\n")
-            print("=" * 60)
-            
-            # Test just the first query
-            query = test_queries[0]
-            print(f"\nTesting: '{query}'")
+        # Create GraphState - the graph will fetch context in classify_intent_node
+        state = GraphState(
+            chat_messages=[HumanMessage(content=message)],
+            tenant_id=self.tenant_id,
+            session_id=self.session_id
+        )
+        
+        # Run the graph
+        result = await self.graph.ainvoke(state.model_dump())
+        
+        # Extract response from final_answer
+        if result.get('final_answer'):
             try:
-                result = await process_user_query(query, tenant_id)
-                print(result)
-            except Exception as e:
-                print(f"Error: {e}")
-                import traceback
-                traceback.print_exc()
+                # Try to parse as JSON (from validation node)
+                validation_data = json.loads(result['final_answer'])
+                response = self._format_product_response(validation_data)
+            except json.JSONDecodeError:
+                response = result['final_answer']
+        else:
+            response = 'No response generated'
         
-        # Run the async test
-        try:
-            asyncio.run(test_mission_control())
-        finally:
-            # Explicit cleanup
-            if _db_instance:
-                _db_instance.close()
+        # Save to memory
+        self.memory.add_message(response, "assistant")
+        
+        return response
     
-    main()
+    def _format_product_response(self, validation_data):
+        """Format product validation response for terminal display"""
+        lines = []
+        for product in validation_data.get('validated_products', []):
+            status = "✅" if product['fits_criteria'] else "❌"
+            lines.append(f"{status} Product #{product['product_id']}: {product['reason']}")
+        
+        if validation_data.get('overall_summary'):
+            lines.append(f"\nSummary: {validation_data['overall_summary']}")
+        
+        return "\n".join(lines)
+    
+    async def chat_loop(self):
+        print("Chat started. Type 'quit' to exit.")
+        
+        while True:
+            user_input = input("\nYou: ").strip()
+            
+            if user_input.lower() == 'quit':
+                break
+            
+            if not user_input:
+                continue
+            
+            response = await self.process_message(user_input)
+            print(f"Assistant: {response}")
+
+
+async def main():
+    server = ChatServer()
+    server.create_session()
+    await server.chat_loop()
+    server.db.close()
+
+
+if __name__ == "__main__":
+    asyncio.run(main())

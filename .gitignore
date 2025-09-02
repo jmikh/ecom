@@ -77,3 +77,25 @@ ingestion.log
 *.csv
 shopify_products_*.json
 shopify_products_*.csv
+
+# Frontend / TypeScript
+frontend/node_modules/
+frontend/dist/
+frontend/*.log
+frontend/.npm
+frontend/.yarn-integrity
+frontend/.parcel-cache/
+*.js.map
+*.d.ts.map
+
+# TypeScript build info
+*.tsbuildinfo
+
+# Screenshots and media
+frontend/assets/screenshots/
+screenshots/
+*.png
+*.jpg
+*.jpeg
+*.gif
+*.svg

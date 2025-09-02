@@ -6,27 +6,16 @@ from langsmith import traceable
 
 from src.agent.graph_state import GraphState
 from src.agent.config import config
+from src.shared.schemas import ProductCard, ProductRecommendationResponse
 
 
-class ProductValidation(BaseModel):
-    product_id: int = Field(description="The product ID from the database")
-    relevance_score: float = Field(
-        ge=0.0, 
-        le=1.0, 
-        description="Relevance score from 0.0 to 1.0 based on how well it matches the user's request"
+class LLMProductValidation(BaseModel):
+    """LLM's validation of products - only IDs and reasoning"""
+    product_ids: List[int] = Field(
+        description="List of product IDs ordered by relevance"
     )
-    fits_criteria: bool = Field(description="True if the product fits the user's criteria, False otherwise")
-    reason: str = Field(
-        description="Short sentence explaining why this product was selected or why it doesn't fit but is still shown"
-    )
-
-
-class ValidatedProductsResponse(BaseModel):
-    validated_products: List[ProductValidation] = Field(
-        description="List of products ordered by relevance with validation details"
-    )
-    overall_summary: str = Field(
-        description="Brief summary of the product selection and recommendations"
+    reasoning: str = Field(
+        description="Overall explanation of why these products were recommended"
     )
 
 
@@ -45,7 +34,7 @@ def validate_recommended_products_node(state: GraphState) -> GraphState:
             model=config.openai_model,
             temperature=0.1,  # Low temperature for consistent validation
             openai_api_key=config.openai_api_key
-        ).with_structured_output(ValidatedProductsResponse)
+        ).with_structured_output(LLMProductValidation)
         
         # Format products for LLM analysis
         import json
@@ -82,13 +71,37 @@ Consider the user's specific requirements (price range, product type, features m
         # Get structured response
         validation_response = llm.invoke(messages)
         
-        # Store validation results in final_answer
-        state.final_answer = validation_response.model_dump_json(indent=2)
+        # Build ProductCard objects from finalist products matching the LLM's selected IDs
+        product_cards = []
+        products_by_id = {p['id']: p for p in state.finalist_products}
         
-        state.internal_messages.append(AIMessage(content=f"Validation complete: {len(validation_response.validated_products)} products ranked"))
+        for product_id in validation_response.product_ids:
+            if product_id in products_by_id:
+                product = products_by_id[product_id]
+                card = ProductCard(
+                    id=product['id'],
+                    name=product.get('title', ''),
+                    vendor=product.get('vendor', ''),
+                    image_url=product.get('image_url'),
+                    price_min=float(product.get('min_price', 0)),
+                    price_max=float(product.get('max_price', 0)),
+                    has_discount=product.get('has_discount', False)
+                )
+                product_cards.append(card)
         
-        print(f"✅ Validated {len(validation_response.validated_products)} products")
-        print(f"📊 Overall summary: {validation_response.overall_summary}")
+        # Create the final structured response
+        recommendation_response = ProductRecommendationResponse(
+            products=product_cards,
+            message=validation_response.reasoning
+        )
+        
+        # Store structured response as JSON string in final_answer
+        state.final_answer = recommendation_response.model_dump_json(indent=2)
+        
+        state.internal_messages.append(AIMessage(content=f"Validation complete: {len(product_cards)} products selected"))
+        
+        print(f"✅ Selected {len(product_cards)} products from {len(state.finalist_products)} candidates")
+        print(f"📊 Reasoning: {validation_response.reasoning}")
         
     except Exception as e:
         print(f"❌ Error validating products: {e}")

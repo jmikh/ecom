@@ -1,42 +1,148 @@
-# Shopify E-commerce Product Ingestion System
+# E-commerce AI Chat System with Product Recommendations
 
 ## Overview
-Multi-tenant Shopify product ingestion system that fetches products from Shopify stores, processes them into a structured database, and generates semantic embeddings for search. Built with PostgreSQL + pgvector, Python, and OpenAI embeddings.
+Multi-tenant e-commerce system combining Shopify product ingestion, AI-powered chat interface, and intelligent product recommendations. Built with PostgreSQL + pgvector for semantic search, LangGraph for conversational AI, FastAPI for the web server, and TypeScript for type-safe frontend development.
 
 ## Architecture
 
-### Core Components
+### System Components
 
-1. **Shopify Fetcher** (`src/pipeline/fetch_products.py`)
-   - Fetches products from Shopify Admin API with pagination
-   - Handles rate limiting (2 requests/second)
-   - Extracts products, variants, images, and options
-   - Saves raw data to JSON files
+```
+┌─────────────────────────────────────────────────────────────┐
+│                         Frontend                             │
+│  ┌──────────────┐  ┌──────────────┐  ┌──────────────────┐  │
+│  │  Home Page   │  │ Chat Widget  │  │  TypeScript      │  │
+│  │  (index.html)│  │ (widget.js)  │  │  Types (.ts)     │  │
+│  └──────────────┘  └──────────────┘  └──────────────────┘  │
+└─────────────────────────┬───────────────────────────────────┘
+                          │ HTTP/SSE
+┌─────────────────────────▼───────────────────────────────────┐
+│                      FastAPI Server                          │
+│  ┌──────────────┐  ┌──────────────┐  ┌──────────────────┐  │
+│  │   Routes     │  │ Chat Service │  │     Auth         │  │
+│  │  (app.py)    │  │              │  │   (tenant)       │  │
+│  └──────────────┘  └──────────────┘  └──────────────────┘  │
+└─────────────────────────┬───────────────────────────────────┘
+                          │
+┌─────────────────────────▼───────────────────────────────────┐
+│                    LangGraph Agent                           │
+│  ┌──────────────┐  ┌──────────────┐  ┌──────────────────┐  │
+│  │   Intent     │  │   Product    │  │   Validation     │  │
+│  │ Classifier   │  │   Search     │  │     Node         │  │
+│  └──────────────┘  └──────────────┘  └──────────────────┘  │
+└─────────────────────────┬───────────────────────────────────┘
+                          │
+┌─────────────────────────▼───────────────────────────────────┐
+│                  Data Layer                                  │
+│  ┌──────────────┐  ┌──────────────┐  ┌──────────────────┐  │
+│  │  PostgreSQL  │  │    Redis     │  │   Embeddings     │  │
+│  │  + pgvector  │  │  (sessions)  │  │    (OpenAI)      │  │
+│  └──────────────┘  └──────────────┘  └──────────────────┘  │
+└──────────────────────────────────────────────────────────────┘
+```
 
-2. **Database Inserter** (`src/pipeline/insert_products.py`)
-   - Processes JSON data into normalized database tables
-   - Computes price ranges, discounts, and structured options
-   - Handles products, variants, images, and embedding text
-   - Uses DELETE/INSERT pattern for data consistency
+## Project Structure
 
-3. **Embedding Generator** (`src/pipeline/generate_embeddings.py`)
-   - Creates embeddings from product title, type, tags, vendor, options, description
-   - Batch processing with OpenAI text-embedding-3-small model
-   - Stores 1536-dimension vectors for semantic search
+```
+ecom/
+├── src/
+│   ├── agent/                      # LangGraph AI Agent
+│   │   ├── main_graph.py           # Main workflow orchestrator
+│   │   ├── graph_state.py          # State management
+│   │   ├── config.py               # Agent configuration
+│   │   ├── classify_intent_node.py # Intent classification
+│   │   ├── get_product_filters_node.py      # Extract search filters
+│   │   ├── fetch_candidate_products_node.py # Database search
+│   │   ├── validate_recommended_products_node.py # LLM validation
+│   │   ├── product_recommendation_graph.py  # Recommendation subgraph
+│   │   ├── product_inquiry_graph.py        # Product Q&A subgraph
+│   │   ├── store_brand_graph.py            # Store info subgraph
+│   │   ├── unrelated_graph.py              # Fallback subgraph
+│   │   └── error_node.py                   # Error handling
+│   │
+│   ├── database/                   # Database Layer
+│   │   ├── __init__.py            # Connection pool management
+│   │   ├── setup.py               # Schema creation
+│   │   └── manage_tenants.py     # Tenant CRUD operations
+│   │
+│   ├── pipeline/                   # Data Ingestion Pipeline
+│   │   ├── fetch_products.py     # Shopify API client
+│   │   ├── insert_products.py    # Database insertion
+│   │   ├── generate_embeddings.py # Vector generation
+│   │   └── ingest_shopify.py     # Pipeline orchestrator
+│   │
+│   └── shared/                     # Shared Components
+│       ├── schemas.py             # Pydantic models (ProductCard, etc.)
+│       └── __init__.py
+│
+├── server/                         # Web Server
+│   ├── app.py                    # FastAPI application & routes
+│   ├── auth.py                   # Tenant authentication
+│   ├── chat_service.py           # Chat processing & SSE streaming
+│   ├── config.py                 # Server configuration
+│   ├── models.py                 # Request/Response models
+│   │
+│   └── static/                    # Frontend Assets
+│       ├── index.html            # E-commerce home page
+│       ├── widget.js             # Embeddable chat widget
+│       ├── types.ts              # TypeScript interfaces (generated)
+│       ├── widget-typed.ts       # TypeScript widget implementation
+│       ├── test_page.html        # Widget test page
+│       ├── typed-example.html    # TypeScript demo page
+│       └── tsconfig.json         # TypeScript configuration
+│
+├── tests/                          # Test Files
+│   ├── test_widget.py            # Widget interaction tests
+│   ├── test_widget_mens.py       # Category search tests
+│   └── test_homepage.py          # Home page tests
+│
+├── scripts/                        # Utility Scripts
+│   ├── generate_types.py         # Generate TypeScript from Pydantic
+│   └── all_models.py             # Consolidated models for TS generation
+│
+├── run_server.py                  # Server entry point
+├── requirements.txt               # Python dependencies
+├── .env                          # Environment configuration
+└── CLAUDE.md                     # This documentation
 
-4. **Tenant Manager** (`src/database/manage_tenants.py`)
-   - Creates, lists, and deletes tenants
-   - Auto-generates UUIDs for tenant isolation
-   - Manages multi-tenant data separation
+```
 
-5. **Pipeline Orchestrator** (`src/pipeline/ingest_shopify.py`)
-   - Coordinates full pipeline: fetch → insert → embeddings
-   - Supports individual operations or complete workflow
-   - Validates tenant existence and JSON file requirements
+## Core Features
 
-### Database Schema
+### 1. **Product Ingestion Pipeline**
+- Fetches products from Shopify stores
+- Normalizes data into PostgreSQL tables
+- Generates semantic embeddings for search
+- Multi-tenant data isolation
 
-**Multi-tenant Architecture with Row Level Security (RLS)**
+### 2. **AI Chat Agent (LangGraph)**
+- **Intent Classification**: Routes queries to appropriate workflows
+- **Product Recommendations**: Semantic + filter-based search
+- **Structured Responses**: Returns typed ProductCard objects
+- **Context Management**: Maintains conversation history
+
+### 3. **Web Server (FastAPI)**
+- **Endpoints**:
+  - `GET /` - Home page with product catalog
+  - `POST /api/session` - Session management
+  - `POST /api/chat/stream` - SSE streaming chat
+  - `GET /api/products/{tenant_id}` - Product listing
+  - `GET /api/chat/history/{session_id}` - Chat history
+- **Features**:
+  - Server-Sent Events for real-time streaming
+  - Redis session storage
+  - Multi-tenant support
+  - CORS configuration
+
+### 4. **Frontend Components**
+- **Home Page**: Product grid with filtering/sorting
+- **Chat Widget**: Embeddable customer support interface
+- **TypeScript Types**: Generated from Pydantic models
+- **Product Cards**: Rich media display with images/prices
+
+## Database Schema
+
+### Multi-tenant Architecture with Row Level Security (RLS)
 
 ```sql
 -- Tenant isolation
@@ -53,72 +159,7 @@ product_images (id, product_id FK, tenant_id FK, shopify_image_id,
                src, alt, position, variant_ids[], ...)
 
 -- Embedding system
-product_embedding_text (product_id FK, tenant_id FK, embedding_text TEXT)
 product_embeddings (product_id FK, tenant_id FK, embedding VECTOR(1536))
-```
-
-**Key Features:**
-- UUID-based tenant isolation for security
-- CASCADE deletes maintain referential integrity
-- JSONB for flexible product options storage
-- pgvector for semantic search capabilities
-- Comprehensive indexing for performance
-
-## Usage
-
-### 1. Database Setup
-```bash
-# Create database with pgvector extension
-source venv/bin/activate
-python src/database/setup.py
-```
-
-### 2. Tenant Management
-```bash
-# Create a new tenant
-python src/database/manage_tenants.py create "Store Name"
-
-# List all tenants
-python src/database/manage_tenants.py list
-
-# Delete tenant (WARNING: deletes all data)
-python src/database/manage_tenants.py delete <tenant-uuid>
-```
-
-### 3. Product Ingestion
-
-**Full Pipeline (Recommended):**
-```bash
-python src/pipeline/ingest_shopify.py \
-  --shopify-url https://store.myshopify.com \
-  --json-file products.json \
-  --tenant-id <tenant-uuid>
-```
-
-**Individual Operations:**
-```bash
-# Fetch only
-python src/pipeline/ingest_shopify.py --fetch-only \
-  --shopify-url https://store.myshopify.com \
-  --json-file products.json \
-  --tenant-id <tenant-uuid>
-
-# Insert only
-python src/pipeline/ingest_shopify.py --insert-only \
-  --json-file products.json \
-  --tenant-id <tenant-uuid>
-
-# Embeddings only
-python src/pipeline/ingest_shopify.py --embeddings-only \
-  --tenant-id <tenant-uuid>
-```
-
-**Direct Script Usage:**
-```bash
-# Individual components
-python src/pipeline/fetch_products.py https://store.myshopify.com products.json
-python src/pipeline/insert_products.py products.json --tenant-id <uuid>
-python src/pipeline/generate_embeddings.py --tenant-id <uuid>
 ```
 
 ## Configuration
@@ -139,140 +180,204 @@ SHOPIFY_API_VERSION=2025-07
 
 # OpenAI Configuration
 OPENAI_API_KEY=sk-...
-OPENAI_MODEL=gpt-5-mini
+OPENAI_MODEL=gpt-4o-mini
+OPENAI_EMBEDDING_MODEL=text-embedding-3-small
+
+# Redis Configuration
+REDIS_URL=redis://localhost:6379/0
+
+# LangSmith (Optional)
+LANGSMITH_API_KEY=ls_...
+LANGCHAIN_TRACING_V2=true
+LANGCHAIN_PROJECT=ecom-product-agent
 ```
 
-### Key Parameters
-- **Embedding Batch Size**: 100 products per OpenAI API call
-- **Shopify Rate Limit**: 2 requests/second (0.5s delay)
-- **Embedding Model**: text-embedding-3-small (1536 dimensions)
-- **Tenant Isolation**: UUID-based with RLS policies
+## Usage
 
-## Data Flow
+### 1. Database Setup
+```bash
+# Create database with pgvector extension
+python src/database/setup.py
 
-### Ingestion Pipeline
-1. **Fetch**: Shopify API → JSON file
-   - Paginated product retrieval
-   - Rate limiting compliance
-   - Complete product/variant/image data
-
-2. **Process**: JSON → Database tables
-   - Normalize Shopify data structure
-   - Compute price ranges and discount flags
-   - Extract options into JSONB format
-   - Generate embedding text content
-
-3. **Embed**: Text → Vector embeddings
-   - Combine title, type, tags, vendor, options, description
-   - Batch API calls for efficiency
-   - Store vectors for similarity search
-
-### Embedding Content Structure
-```json
-{
-  "title": "Product Name",
-  "product_type": "Category",
-  "tags": "tag1, tag2, tag3",
-  "vendor": "Brand Name",
-  "options": {"Size": ["S", "M", "L"], "Color": ["Red", "Blue"]},
-  "description": "Clean text from body_html"
-}
+# Create a tenant
+python src/database/manage_tenants.py create "Store Name"
+# Returns: tenant_id (UUID)
 ```
 
-## Multi-Tenant Features
+### 2. Product Ingestion
+```bash
+# Full pipeline
+python src/pipeline/ingest_shopify.py \
+  --shopify-url https://store.myshopify.com \
+  --json-file products.json \
+  --tenant-id <tenant-uuid>
 
-### Tenant Isolation
-- **Database Level**: Row Level Security policies
-- **Application Level**: Tenant context setting
-- **Data Integrity**: Foreign key constraints to tenants table
-- **Cleanup**: CASCADE deletes when tenant removed
-
-### Security Benefits
-- UUID tenant IDs prevent enumeration attacks
-- RLS ensures queries only see tenant's data
-- No cross-tenant data leakage
-- Secure API key management per tenant
-
-## Performance & Monitoring
-
-### Batch Processing
-- **Products**: Processed individually with commit every 10
-- **Variants**: Bulk insert via execute_batch
-- **Images**: Individual inserts with FK mapping
-- **Embeddings**: Batched API calls (100 products)
-
-### Database Optimization
-- **Indexes**: Strategic indexes on tenant_id, shopify_id, prices
-- **JSONB**: GIN indexes on options for fast queries
-- **Vectors**: IVFFlat index for similarity search
-- **Foreign Keys**: Optimized CASCADE relationships
-
-## Error Handling
-
-### Robust Ingestion
-- **API Errors**: Retry with backoff, detailed error reporting
-- **Database Errors**: Transaction rollback, halt on critical failures
-- **Validation**: UUID format checking, file existence verification
-- **Tenant Verification**: Ensures tenant exists before processing
-
-### Recovery Strategies
-- **Partial Failures**: Individual operations can be retried
-- **Data Consistency**: DELETE/INSERT ensures clean state
-- **Embedding Recovery**: Regenerate embeddings without affecting products
-
-## Files Structure
+# Or individual steps
+python src/pipeline/fetch_products.py <shopify-url> <output.json>
+python src/pipeline/insert_products.py <input.json> --tenant-id <uuid>
+python src/pipeline/generate_embeddings.py --tenant-id <uuid>
 ```
-src/
-├── database/
-│   ├── setup.py              # Database schema creation
-│   └── manage_tenants.py     # Tenant CRUD operations
-├── pipeline/
-│   ├── fetch_products.py     # Shopify API client
-│   ├── insert_products.py    # Database insertion
-│   ├── generate_embeddings.py # Vector generation
-│   └── ingest_shopify.py     # Pipeline orchestration
-└── .env                      # Configuration
+
+### 3. Start Server
+```bash
+# Development server with auto-reload
+python run_server.py
+
+# Access at:
+# - Home: http://localhost:8000
+# - API Docs: http://localhost:8000/docs
+# - Test Page: http://localhost:8000/static/test_page.html
 ```
+
+### 4. Embed Chat Widget
+```html
+<!-- Add to any website -->
+<script src="http://localhost:8000/static/widget.js" 
+        data-tenant-id="YOUR-TENANT-UUID">
+</script>
+```
+
+## TypeScript Integration
+
+### Generate Types from Pydantic Models
+```bash
+# Install dependencies
+npm install -g json-schema-to-typescript
+pip install pydantic-to-typescript
+
+# Generate TypeScript interfaces
+pydantic2ts --module ./all_models.py --output server/static/types.ts
+
+# Compile TypeScript
+cd server/static && npx tsc
+```
+
+### Benefits
+- **Type Safety**: Catch errors at compile time
+- **IDE Support**: Full autocomplete for API calls
+- **Single Source of Truth**: Backend models define the contract
+- **Type Guards**: Runtime validation of API responses
+
+## LangGraph Agent Workflow
+
+### Main Graph Flow
+```
+User Message
+    ↓
+Classify Intent
+    ↓
+┌─────────────────────────────────┐
+│  Route by Intent                │
+├─────────────────────────────────┤
+│ • PRODUCT_RECOMMENDATION        │ → Get Filters → Fetch Products → Validate
+│ • PRODUCT_INQUIRY               │ → Product Q&A Handler
+│ • STORE_BRAND                   │ → Store Info Handler  
+│ • UNRELATED                     │ → Fallback Response
+└─────────────────────────────────┘
+    ↓
+Return Response
+```
+
+### Product Recommendation Pipeline
+1. **Extract Filters**: Parse user query for product criteria
+2. **Database Search**: Combined SQL filters + semantic search
+3. **LLM Validation**: Rank and explain recommendations
+4. **Structured Response**: Return ProductCard[] with reasoning
+
+## Testing
+
+### Browser Automation (Playwright)
+```bash
+# Install Playwright
+pip install playwright
+playwright install chromium
+
+# Run tests
+python test_widget.py         # Test chat interaction
+python test_homepage.py       # Test product display
+python test_widget_mens.py    # Test category filtering
+```
+
+### Manual Testing
+1. Open http://localhost:8000
+2. Browse products with filters
+3. Click chat widget button
+4. Try queries like:
+   - "Show me outdoor gear under $50"
+   - "I need camping equipment"
+   - "What shirts do you have?"
+
+## Performance Optimizations
+
+- **Connection Pooling**: Database connections reused
+- **Batch Processing**: Embeddings generated in batches of 100
+- **Caching**: Redis session cache (1 hour TTL)
+- **Streaming**: SSE for real-time responses
+- **Lazy Loading**: Products fetched on demand
+- **Vector Indexing**: IVFFlat index for similarity search
+
+## Security Features
+
+- **Multi-tenant Isolation**: UUID-based tenant separation
+- **Row Level Security**: PostgreSQL RLS policies
+- **Session Management**: Secure cookie-based sessions
+- **Input Validation**: Pydantic models validate all inputs
+- **CORS Configuration**: Controlled cross-origin access
+- **Environment Variables**: Secrets kept out of code
+
+## Common Operations
+
+### View Logs
+```bash
+# Server logs
+tail -f server.log
+
+# LangSmith traces (if configured)
+# Visit: https://smith.langchain.com
+```
+
+### Database Queries
+```sql
+-- Count products per tenant
+SELECT tenant_id, COUNT(*) FROM products GROUP BY tenant_id;
+
+-- Check embeddings
+SELECT COUNT(*) FROM product_embeddings WHERE embedding IS NOT NULL;
+
+-- View product types
+SELECT DISTINCT product_type FROM products WHERE tenant_id = '...';
+```
+
+### Troubleshooting
+- **403 Errors**: Check Shopify access token
+- **No Products**: Verify tenant_id exists
+- **Chat Not Working**: Check Redis is running
+- **Type Errors**: Regenerate TypeScript types
+
+## Future Enhancements
+
+- [ ] User authentication & accounts
+- [ ] Order processing integration
+- [ ] Advanced analytics dashboard
+- [ ] Mobile app support
+- [ ] Real-time inventory updates
+- [ ] Multi-language support
+- [ ] A/B testing for recommendations
+- [ ] Custom training for product matching
 
 ## Development Notes
 
 ### Best Practices
 - Always create tenants before ingestion
-- Validate Shopify credentials in .env
-- Monitor API rate limits during fetching
-- Use DELETE/INSERT for data consistency
 - Test with small datasets first
+- Monitor OpenAI API usage
+- Use TypeScript for new frontend code
+- Keep Pydantic models as source of truth
 
-### Common Issues
-- **403 Errors**: Check Shopify access token permissions
-- **Rate Limiting**: Built-in delays handle Shopify limits
-- **Memory Usage**: Large catalogs processed in batches
-- **Embedding Costs**: Monitor OpenAI usage during development
-
-### Troubleshooting
-```bash
-# Check tenant exists
-python src/database/manage_tenants.py list
-
-# Verify database connection
-psql -h localhost -U user -d ecom_products -c "SELECT COUNT(*) FROM tenants;"
-
-# Test Shopify connection
-python src/pipeline/fetch_products.py https://store.myshopify.com test.json
-
-# Monitor embeddings generation
-tail -f embedding_logs.txt  # If logging enabled
-```
-
-## Scaling Considerations
-
-### Multi-Store Support
-- Each Shopify store gets unique tenant_id
-- Isolated data processing per tenant
-- Concurrent ingestion possible with different tenants
-
-### Performance Tuning
-- Adjust embedding batch sizes based on OpenAI limits
-- Scale database connections for concurrent tenants
-- Implement queue system for large-scale ingestion
-- Consider read replicas for analytics workloads
+### Key Technologies
+- **Backend**: Python, FastAPI, LangGraph, Pydantic
+- **Frontend**: TypeScript, Server-Sent Events
+- **Database**: PostgreSQL, pgvector, Redis
+- **AI/ML**: OpenAI GPT-4o-mini, text-embedding-3-small
+- **Testing**: Playwright, pytest
+- **DevOps**: Docker-ready, environment-based config

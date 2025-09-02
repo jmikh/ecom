@@ -1,0 +1,556 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>E-commerce Store - Product Catalog</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: #f7f8fa;
+            min-height: 100vh;
+        }
+        
+        /* Header */
+        .header {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            padding: 20px 0;
+            box-shadow: 0 2px 10px rgba(0, 0, 0, 0.1);
+        }
+        
+        .header-content {
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 0 20px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+        
+        .logo {
+            font-size: 28px;
+            font-weight: 700;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+        
+        .logo-icon {
+            font-size: 32px;
+        }
+        
+        .nav-links {
+            display: flex;
+            gap: 30px;
+            list-style: none;
+        }
+        
+        .nav-links a {
+            color: white;
+            text-decoration: none;
+            font-weight: 500;
+            transition: opacity 0.3s;
+        }
+        
+        .nav-links a:hover {
+            opacity: 0.8;
+        }
+        
+        /* Hero Section */
+        .hero {
+            background: white;
+            padding: 40px 20px;
+            text-align: center;
+            border-bottom: 1px solid #e0e0e0;
+        }
+        
+        .hero h1 {
+            font-size: 36px;
+            color: #333;
+            margin-bottom: 10px;
+        }
+        
+        .hero p {
+            font-size: 18px;
+            color: #666;
+            margin-bottom: 20px;
+        }
+        
+        .chat-hint {
+            display: inline-block;
+            background: #f0f0f0;
+            padding: 10px 20px;
+            border-radius: 20px;
+            color: #667eea;
+            font-weight: 500;
+        }
+        
+        /* Filters */
+        .filters {
+            background: white;
+            padding: 20px;
+            border-bottom: 1px solid #e0e0e0;
+        }
+        
+        .filters-content {
+            max-width: 1200px;
+            margin: 0 auto;
+            display: flex;
+            gap: 20px;
+            align-items: center;
+            flex-wrap: wrap;
+        }
+        
+        .filter-group {
+            display: flex;
+            gap: 10px;
+            align-items: center;
+        }
+        
+        .filter-label {
+            color: #666;
+            font-weight: 500;
+        }
+        
+        .filter-select {
+            padding: 8px 12px;
+            border: 1px solid #ddd;
+            border-radius: 6px;
+            background: white;
+            cursor: pointer;
+            min-width: 150px;
+        }
+        
+        .product-count {
+            margin-left: auto;
+            color: #999;
+            font-size: 14px;
+        }
+        
+        /* Products Grid */
+        .products-container {
+            max-width: 1200px;
+            margin: 40px auto;
+            padding: 0 20px;
+        }
+        
+        .products-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(250px, 1fr));
+            gap: 30px;
+            margin-bottom: 40px;
+        }
+        
+        .product-card {
+            background: white;
+            border-radius: 12px;
+            overflow: hidden;
+            box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+            transition: transform 0.3s ease, box-shadow 0.3s ease;
+            cursor: pointer;
+        }
+        
+        .product-card:hover {
+            transform: translateY(-5px);
+            box-shadow: 0 8px 20px rgba(0, 0, 0, 0.15);
+        }
+        
+        .product-image {
+            width: 100%;
+            height: 250px;
+            object-fit: cover;
+            background: #f5f5f5;
+        }
+        
+        .product-info {
+            padding: 20px;
+        }
+        
+        .product-type {
+            font-size: 12px;
+            color: #999;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+            margin-bottom: 5px;
+        }
+        
+        .product-name {
+            font-size: 18px;
+            font-weight: 600;
+            color: #333;
+            margin-bottom: 8px;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            display: -webkit-box;
+            -webkit-line-clamp: 2;
+            -webkit-box-orient: vertical;
+        }
+        
+        .product-vendor {
+            font-size: 14px;
+            color: #666;
+            margin-bottom: 12px;
+        }
+        
+        .product-price {
+            font-size: 20px;
+            color: #667eea;
+            font-weight: 700;
+        }
+        
+        .discount-badge {
+            display: inline-block;
+            background: #ff4757;
+            color: white;
+            padding: 4px 8px;
+            border-radius: 4px;
+            font-size: 11px;
+            margin-left: 10px;
+            font-weight: 500;
+        }
+        
+        /* Loading State */
+        .loading {
+            text-align: center;
+            padding: 60px 20px;
+            color: #999;
+        }
+        
+        .loading-spinner {
+            width: 40px;
+            height: 40px;
+            border: 4px solid #f3f3f3;
+            border-top: 4px solid #667eea;
+            border-radius: 50%;
+            animation: spin 1s linear infinite;
+            margin: 0 auto 20px;
+        }
+        
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+        
+        /* Empty State */
+        .empty-state {
+            text-align: center;
+            padding: 80px 20px;
+            color: #999;
+        }
+        
+        .empty-icon {
+            font-size: 64px;
+            margin-bottom: 20px;
+        }
+        
+        /* Footer */
+        .footer {
+            background: #333;
+            color: white;
+            padding: 40px 20px;
+            text-align: center;
+            margin-top: 80px;
+        }
+        
+        .footer-content {
+            max-width: 1200px;
+            margin: 0 auto;
+        }
+        
+        /* Responsive */
+        @media (max-width: 768px) {
+            .header-content {
+                flex-direction: column;
+                gap: 20px;
+            }
+            
+            .hero h1 {
+                font-size: 28px;
+            }
+            
+            .products-grid {
+                grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+                gap: 20px;
+            }
+            
+            .filters-content {
+                flex-direction: column;
+                align-items: stretch;
+            }
+            
+            .product-count {
+                margin-left: 0;
+                text-align: center;
+            }
+        }
+    </style>
+</head>
+<body>
+    <!-- Header -->
+    <header class="header">
+        <div class="header-content">
+            <div class="logo">
+                <span class="logo-icon">🛍️</span>
+                <span>E-commerce Store</span>
+            </div>
+            <nav>
+                <ul class="nav-links">
+                    <li><a href="#products">Products</a></li>
+                    <li><a href="#about">About</a></li>
+                    <li><a href="#contact">Contact</a></li>
+                </ul>
+            </nav>
+        </div>
+    </header>
+
+    <!-- Hero Section -->
+    <section class="hero">
+        <h1>Welcome to Our Store</h1>
+        <p>Discover amazing products at great prices</p>
+        <div class="chat-hint">💬 Use the chat widget for personalized recommendations!</div>
+    </section>
+
+    <!-- Filters -->
+    <section class="filters">
+        <div class="filters-content">
+            <div class="filter-group">
+                <span class="filter-label">Category:</span>
+                <select class="filter-select" id="categoryFilter">
+                    <option value="">All Categories</option>
+                </select>
+            </div>
+            <div class="filter-group">
+                <span class="filter-label">Sort by:</span>
+                <select class="filter-select" id="sortFilter">
+                    <option value="newest">Newest First</option>
+                    <option value="price-low">Price: Low to High</option>
+                    <option value="price-high">Price: High to Low</option>
+                    <option value="name">Name: A to Z</option>
+                </select>
+            </div>
+            <div class="product-count" id="productCount">Loading products...</div>
+        </div>
+    </section>
+
+    <!-- Products Container -->
+    <main class="products-container">
+        <div id="productsGrid" class="products-grid">
+            <!-- Products will be loaded here -->
+        </div>
+        
+        <!-- Loading State -->
+        <div id="loadingState" class="loading">
+            <div class="loading-spinner"></div>
+            <p>Loading products...</p>
+        </div>
+        
+        <!-- Empty State -->
+        <div id="emptyState" class="empty-state" style="display: none;">
+            <div class="empty-icon">📦</div>
+            <h2>No products found</h2>
+            <p>Try adjusting your filters or check back later</p>
+        </div>
+    </main>
+
+    <!-- Footer -->
+    <footer class="footer">
+        <div class="footer-content">
+            <p>&copy; 2024 E-commerce Store. All rights reserved.</p>
+            <p>Powered by AI Chat Assistant</p>
+        </div>
+    </footer>
+
+    <!-- Chat Widget -->
+    <script src="/src/widget.js" data-tenant-id="6b028cbb-512d-4538-a3b1-71bc40f49ed1"></script>
+
+    <!-- Page Script -->
+    <script>
+        // Configuration
+        const TENANT_ID = '6b028cbb-512d-4538-a3b1-71bc40f49ed1';
+        const API_URL = 'http://localhost:8000';
+        
+        // State
+        let allProducts = [];
+        let filteredProducts = [];
+        let categories = new Set();
+        
+        // DOM Elements
+        const productsGrid = document.getElementById('productsGrid');
+        const loadingState = document.getElementById('loadingState');
+        const emptyState = document.getElementById('emptyState');
+        const productCount = document.getElementById('productCount');
+        const categoryFilter = document.getElementById('categoryFilter');
+        const sortFilter = document.getElementById('sortFilter');
+        
+        // Load products from API
+        async function loadProducts() {
+            try {
+                const response = await fetch(`${API_URL}/api/products/${TENANT_ID}?limit=200`);
+                if (!response.ok) throw new Error('Failed to fetch products');
+                
+                const data = await response.json();
+                allProducts = data.products || [];
+                
+                // Extract categories
+                allProducts.forEach(product => {
+                    if (product.product_type) {
+                        categories.add(product.product_type);
+                    }
+                });
+                
+                // Populate category filter
+                populateCategoryFilter();
+                
+                // Initial display
+                filteredProducts = [...allProducts];
+                displayProducts();
+                
+            } catch (error) {
+                console.error('Error loading products:', error);
+                showError();
+            }
+        }
+        
+        // Populate category filter dropdown
+        function populateCategoryFilter() {
+            categoryFilter.innerHTML = '<option value="">All Categories</option>';
+            Array.from(categories).sort().forEach(category => {
+                const option = document.createElement('option');
+                option.value = category;
+                option.textContent = category;
+                categoryFilter.appendChild(option);
+            });
+        }
+        
+        // Display products in grid
+        function displayProducts() {
+            // Hide loading
+            loadingState.style.display = 'none';
+            
+            if (filteredProducts.length === 0) {
+                productsGrid.innerHTML = '';
+                emptyState.style.display = 'block';
+                productCount.textContent = 'No products';
+                return;
+            }
+            
+            emptyState.style.display = 'none';
+            productCount.textContent = `${filteredProducts.length} product${filteredProducts.length !== 1 ? 's' : ''}`;
+            
+            // Build product cards HTML
+            productsGrid.innerHTML = filteredProducts.map(product => `
+                <div class="product-card" data-product-id="${product.id}">
+                    <img 
+                        class="product-image" 
+                        src="${product.image_url || 'data:image/svg+xml,%3Csvg xmlns="http://www.w3.org/2000/svg" width="250" height="250" viewBox="0 0 250 250"%3E%3Crect width="250" height="250" fill="%23f5f5f5"/%3E%3Ctext x="50%25" y="50%25" dominant-baseline="middle" text-anchor="middle" font-family="sans-serif" font-size="16" fill="%23999"%3ENo Image%3C/text%3E%3C/svg%3E'}"
+                        alt="${product.name}"
+                        onerror="this.src='data:image/svg+xml,%3Csvg xmlns="http://www.w3.org/2000/svg" width="250" height="250" viewBox="0 0 250 250"%3E%3Crect width="250" height="250" fill="%23f5f5f5"/%3E%3Ctext x="50%25" y="50%25" dominant-baseline="middle" text-anchor="middle" font-family="sans-serif" font-size="16" fill="%23999"%3ENo Image%3C/text%3E%3C/svg%3E'"
+                    />
+                    <div class="product-info">
+                        ${product.product_type ? `<div class="product-type">${product.product_type}</div>` : ''}
+                        <h3 class="product-name">${product.name || 'Unnamed Product'}</h3>
+                        ${product.vendor ? `<div class="product-vendor">${product.vendor}</div>` : ''}
+                        <div class="product-price">
+                            ${formatPrice(product.price_min, product.price_max)}
+                            ${product.has_discount ? '<span class="discount-badge">SALE</span>' : ''}
+                        </div>
+                    </div>
+                </div>
+            `).join('');
+        }
+        
+        // Format price display
+        function formatPrice(min, max) {
+            if (min === max || !max) {
+                return `$${min.toFixed(2)}`;
+            }
+            return `$${min.toFixed(2)} - $${max.toFixed(2)}`;
+        }
+        
+        // Show error state
+        function showError() {
+            loadingState.style.display = 'none';
+            productsGrid.innerHTML = '';
+            emptyState.style.display = 'block';
+            emptyState.innerHTML = `
+                <div class="empty-icon">❌</div>
+                <h2>Failed to load products</h2>
+                <p>Please try refreshing the page</p>
+            `;
+        }
+        
+        // Filter products by category
+        function filterByCategory() {
+            const selectedCategory = categoryFilter.value;
+            
+            if (selectedCategory) {
+                filteredProducts = allProducts.filter(p => p.product_type === selectedCategory);
+            } else {
+                filteredProducts = [...allProducts];
+            }
+            
+            sortProducts();
+            displayProducts();
+        }
+        
+        // Sort products
+        function sortProducts() {
+            const sortBy = sortFilter.value;
+            
+            switch(sortBy) {
+                case 'price-low':
+                    filteredProducts.sort((a, b) => a.price_min - b.price_min);
+                    break;
+                case 'price-high':
+                    filteredProducts.sort((a, b) => b.price_max - a.price_max);
+                    break;
+                case 'name':
+                    filteredProducts.sort((a, b) => (a.name || '').localeCompare(b.name || ''));
+                    break;
+                case 'newest':
+                default:
+                    // Keep original order (newest first from API)
+                    break;
+            }
+        }
+        
+        // Event listeners
+        categoryFilter.addEventListener('change', filterByCategory);
+        sortFilter.addEventListener('change', () => {
+            sortProducts();
+            displayProducts();
+        });
+        
+        // Product card click handler
+        productsGrid.addEventListener('click', (e) => {
+            const card = e.target.closest('.product-card');
+            if (card) {
+                const productId = card.dataset.productId;
+                const product = allProducts.find(p => p.id == productId);
+                if (product) {
+                    // Open chat widget with product query
+                    if (window.chatWidget) {
+                        window.chatWidget.toggleChat();
+                        setTimeout(() => {
+                            const input = document.getElementById('chat-input');
+                            if (input) {
+                                input.value = `Tell me more about ${product.name}`;
+                            }
+                        }, 300);
+                    }
+                }
+            }
+        });
+        
+        // Initialize on page load
+        document.addEventListener('DOMContentLoaded', loadProducts);
+    </script>
+</body>
+</html>

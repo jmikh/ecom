@@ -119,18 +119,27 @@ def _semantic_search(tenant_id: str, embeddings: OpenAIEmbeddings, query: str, l
 
 @traceable(name="sql_product_description_fetch")
 def _get_products_by_ids(tenant_id: str, product_ids: List[int]) -> List[Dict[str, Any]]:
-    """Convert product IDs to full product dictionaries"""
+    """Convert product IDs to full product dictionaries with images"""
     if not product_ids:
         return []
     
     query = """
         SELECT 
-            id, shopify_id, title, vendor, product_type,
-            min_price, max_price, has_discount, 
-            options, tags, handle, status,
-            created_at, updated_at, published_at
-        FROM products
-        WHERE tenant_id = %s AND id = ANY(%s)
+            p.id, p.shopify_id, p.title, p.vendor, p.product_type,
+            p.min_price, p.max_price, p.has_discount, 
+            p.options, p.tags, p.handle, p.status,
+            p.created_at, p.updated_at, p.published_at,
+            pi.src as image_url
+        FROM products p
+        LEFT JOIN LATERAL (
+            SELECT src 
+            FROM product_images 
+            WHERE product_id = p.id 
+            AND tenant_id = p.tenant_id
+            ORDER BY position 
+            LIMIT 1
+        ) pi ON true
+        WHERE p.tenant_id = %s AND p.id = ANY(%s)
     """
     
     # Execute query using connection pool
@@ -143,6 +152,8 @@ def _get_products_by_ids(tenant_id: str, product_ids: List[int]) -> List[Dict[st
         for row in results:
             if row['id'] == product_id:
                 product = _serialize_product(dict(row))
+                # Add image_url to the product dict
+                product['image_url'] = row.get('image_url')
                 products.append(product)
                 break
     

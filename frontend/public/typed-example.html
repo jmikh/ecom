@@ -1,0 +1,283 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>TypeScript Types Example</title>
+    <style>
+        body {
+            font-family: 'Monaco', 'Courier New', monospace;
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 40px 20px;
+            background: #1e1e1e;
+            color: #d4d4d4;
+        }
+        
+        h1 {
+            color: #4fc1ff;
+            border-bottom: 2px solid #4fc1ff;
+            padding-bottom: 10px;
+        }
+        
+        .section {
+            margin: 30px 0;
+            padding: 20px;
+            background: #2d2d30;
+            border-radius: 8px;
+            border-left: 4px solid #4fc1ff;
+        }
+        
+        h2 {
+            color: #9cdcfe;
+            margin-top: 0;
+        }
+        
+        pre {
+            background: #1e1e1e;
+            padding: 15px;
+            border-radius: 5px;
+            overflow-x: auto;
+            border: 1px solid #3e3e42;
+        }
+        
+        .good {
+            color: #4ec9b0;
+        }
+        
+        .bad {
+            color: #f48771;
+        }
+        
+        .comment {
+            color: #6a9955;
+        }
+        
+        .keyword {
+            color: #c586c0;
+        }
+        
+        .type {
+            color: #4ec9b0;
+        }
+        
+        .string {
+            color: #ce9178;
+        }
+        
+        button {
+            background: #4fc1ff;
+            color: white;
+            border: none;
+            padding: 10px 20px;
+            border-radius: 5px;
+            cursor: pointer;
+            margin: 10px 5px;
+            font-size: 14px;
+        }
+        
+        button:hover {
+            background: #3fb1ef;
+        }
+        
+        #output {
+            margin-top: 20px;
+            padding: 15px;
+            background: #1e1e1e;
+            border: 1px solid #3e3e42;
+            border-radius: 5px;
+            min-height: 100px;
+        }
+        
+        .error {
+            color: #f48771;
+            background: #2d1212;
+            padding: 10px;
+            border-radius: 5px;
+            margin: 10px 0;
+        }
+        
+        .success {
+            color: #4ec9b0;
+            background: #1a2e1a;
+            padding: 10px;
+            border-radius: 5px;
+            margin: 10px 0;
+        }
+    </style>
+</head>
+<body>
+    <h1>🚀 TypeScript Types for E-commerce API</h1>
+    
+    <div class="section">
+        <h2>✅ Benefits of Explicit Types</h2>
+        <p>With TypeScript types generated from Pydantic models, we get:</p>
+        <ul>
+            <li><strong>Compile-time type checking</strong> - Catch errors before runtime</li>
+            <li><strong>IDE autocomplete</strong> - Know exactly what fields are available</li>
+            <li><strong>Single source of truth</strong> - Backend Pydantic models define the contract</li>
+            <li><strong>Type guards</strong> - Runtime validation of API responses</li>
+        </ul>
+    </div>
+
+    <div class="section">
+        <h2>📝 Type-Safe API Calls</h2>
+        <p>Here's how we make type-safe API calls:</p>
+        
+        <pre><code><span class="comment">// Import types generated from Pydantic models</span>
+<span class="keyword">import type</span> { <span class="type">ChatRequest</span>, <span class="type">ProductCard</span> } <span class="keyword">from</span> <span class="string">'./types'</span>;
+
+<span class="comment">// ✅ GOOD: Type-safe request with autocomplete</span>
+<span class="keyword">const</span> request: <span class="type">ChatRequest</span> = {
+    message: <span class="string">"Show me running shoes"</span>,
+    tenant_id: <span class="string">"6b028cbb-512d-4538-a3b1-71bc40f49ed1"</span>,
+    session_id: sessionId  <span class="comment">// Optional field</span>
+};
+
+<span class="comment">// ❌ BAD: Without types (typos not caught)</span>
+<span class="keyword">const</span> request = {
+    mesage: <span class="string">"Show me running shoes"</span>,  <span class="bad">// Typo! Won't be caught</span>
+    tennant_id: <span class="string">"..."</span>,  <span class="bad">// Another typo!</span>
+};</code></pre>
+    </div>
+
+    <div class="section">
+        <h2>🛡️ Type Guards for Runtime Safety</h2>
+        <p>Type guards validate API responses at runtime:</p>
+        
+        <pre><code><span class="keyword">import</span> { <span class="type">isProductCard</span>, <span class="type">isProductRecommendationResponse</span> } <span class="keyword">from</span> <span class="string">'./types'</span>;
+
+<span class="comment">// Validate response structure at runtime</span>
+<span class="keyword">if</span> (<span class="type">isProductRecommendationResponse</span>(data)) {
+    <span class="comment">// TypeScript now knows data has products[] and message</span>
+    data.products.forEach(product => {
+        console.log(product.name);  <span class="good">// ✅ Autocomplete works!</span>
+        console.log(product.price_min);  <span class="good">// ✅ Type-safe!</span>
+    });
+}</code></pre>
+    </div>
+
+    <div class="section">
+        <h2>🔬 Live Demo</h2>
+        <p>Click the buttons to see type safety in action:</p>
+        
+        <button onclick="makeValidRequest()">✅ Make Valid Request</button>
+        <button onclick="makeInvalidRequest()">❌ Simulate Type Error</button>
+        <button onclick="testTypeGuard()">🛡️ Test Type Guard</button>
+        <button onclick="showAutoComplete()">💡 Show Available Fields</button>
+        
+        <div id="output"></div>
+    </div>
+
+    <script type="module">
+        // Import types (in real app, would be from compiled TypeScript)
+        // For demo, we'll define them inline
+        
+        function makeValidRequest() {
+            const output = document.getElementById('output');
+            
+            // Type-safe request object
+            const request = {
+                message: "Show me outdoor gear",
+                tenant_id: "6b028cbb-512d-4538-a3b1-71bc40f49ed1",
+                session_id: "abc123"
+            };
+            
+            output.innerHTML = `
+                <div class="success">
+                    ✅ Valid ChatRequest created:
+                    <pre>${JSON.stringify(request, null, 2)}</pre>
+                    All required fields present with correct types!
+                </div>
+            `;
+        }
+        
+        function makeInvalidRequest() {
+            const output = document.getElementById('output');
+            
+            // Simulate what TypeScript would catch
+            const errors = [
+                "Property 'mesage' does not exist. Did you mean 'message'?",
+                "Property 'tennant_id' does not exist. Did you mean 'tenant_id'?",
+                "Type 'number' is not assignable to type 'string' for 'session_id'"
+            ];
+            
+            output.innerHTML = `
+                <div class="error">
+                    ❌ TypeScript would catch these errors at compile time:
+                    <ul>
+                        ${errors.map(e => `<li>${e}</li>`).join('')}
+                    </ul>
+                    These errors would be shown in your IDE before you even run the code!
+                </div>
+            `;
+        }
+        
+        function testTypeGuard() {
+            const output = document.getElementById('output');
+            
+            // Simulated API response
+            const validResponse = {
+                products: [
+                    {
+                        id: 1,
+                        name: "Trail Running Shoes",
+                        vendor: "Nike",
+                        price_min: 89.99,
+                        price_max: 89.99,
+                        image_url: null,
+                        has_discount: false
+                    }
+                ],
+                message: "Here's a great trail running shoe option"
+            };
+            
+            // Simple type guard check
+            const isValid = (
+                typeof validResponse === 'object' &&
+                validResponse !== null &&
+                Array.isArray(validResponse.products) &&
+                typeof validResponse.message === 'string'
+            );
+            
+            output.innerHTML = `
+                <div class="success">
+                    🛡️ Type Guard Validation:
+                    <pre>${JSON.stringify(validResponse, null, 2)}</pre>
+                    Is valid ProductRecommendationResponse: ${isValid ? '✅ YES' : '❌ NO'}
+                </div>
+            `;
+        }
+        
+        function showAutoComplete() {
+            const output = document.getElementById('output');
+            
+            const fields = {
+                ChatRequest: ['message', 'tenant_id', 'session_id?'],
+                ProductCard: ['id', 'name', 'vendor', 'image_url?', 'price_min', 'price_max', 'has_discount?'],
+                StreamChunk: ['chunk?', 'type?', 'data?', 'done?', 'error?']
+            };
+            
+            output.innerHTML = `
+                <div class="success">
+                    💡 IDE Autocomplete shows available fields:
+                    ${Object.entries(fields).map(([type, props]) => `
+                        <div style="margin: 15px 0;">
+                            <strong style="color: #4ec9b0">${type}:</strong>
+                            <ul style="margin: 5px 0;">
+                                ${props.map(p => `<li>${p} ${p.includes('?') ? '<span class="comment">(optional)</span>' : '<span style="color: #f48771">(required)</span>'}</li>`).join('')}
+                            </ul>
+                        </div>
+                    `).join('')}
+                </div>
+            `;
+        }
+        
+        // Make functions global for onclick handlers
+        window.makeValidRequest = makeValidRequest;
+        window.makeInvalidRequest = makeInvalidRequest;
+        window.testTypeGuard = testTypeGuard;
+        window.showAutoComplete = showAutoComplete;
+    </script>
+</body>
+</html>

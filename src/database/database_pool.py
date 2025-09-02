@@ -143,6 +143,49 @@ class Database:
             # Always return connection to pool
             self.pool.putconn(conn)
 
+    def run_write(self, sql: str, params: Tuple = (), tenant_id: Optional[str] = None) -> Optional[List[Dict[str, Any]]]:
+        """
+        Execute a write query (INSERT, UPDATE, DELETE) with optional tenant isolation
+        
+        Args:
+            sql: SQL query to execute
+            params: Query parameters for parameterized queries  
+            tenant_id: Optional UUID of the tenant for RLS isolation
+            
+        Returns:
+            For INSERT with RETURNING: List of dictionaries
+            For UPDATE/DELETE: None
+        """
+        if not self.pool:
+            raise RuntimeError("Database connection pool not initialized")
+        
+        # Get connection from pool
+        conn = self.pool.getconn()
+        
+        try:
+            with conn.cursor(cursor_factory=RealDictCursor) as cursor:
+                # Set tenant context if provided
+                if tenant_id:
+                    cursor.execute(f"SET myapp.current_tenant = %s", (tenant_id,))
+                
+                # Execute the write query
+                cursor.execute(sql, params)
+                
+                # Commit the transaction
+                conn.commit()
+                
+                # Return results if query has RETURNING clause
+                if cursor.description:
+                    return cursor.fetchall()
+                return None
+                
+        except Exception as e:
+            # Rollback on error
+            conn.rollback()
+            raise e
+        finally:
+            # Always return connection to pool
+            self.pool.putconn(conn)
 
     def close(self):
         """

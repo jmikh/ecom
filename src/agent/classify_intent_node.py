@@ -13,7 +13,8 @@ from langsmith import traceable
 import asyncio
 
 from src.agent.config import config
-from src.database import ConversationMemory,  get_database
+from src.database import get_database
+from src.database.message_store import ConversationMemory
 from src.agent.graph_state import GraphState, UserIntent, IntentDecision
 
 
@@ -116,7 +117,7 @@ async def classify_intent_node(state: GraphState) -> GraphState:
         
     except Exception as e:
         print(f"❌ Error in classify_intent_node: {e}")
-        state.next_action = "error"
+        state.error = str(e)
         return state
     
     # Create LLM instance within the node

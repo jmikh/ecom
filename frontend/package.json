@@ -1,0 +1,19 @@
+{
+  "name": "ecom-frontend",
+  "version": "1.0.0",
+  "description": "E-commerce chat widget and dashboard",
+  "main": "dist/widget-typed.js",
+  "scripts": {
+    "build": "tsc",
+    "watch": "tsc --watch",
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "type": "commonjs",
+  "devDependencies": {
+    "@types/node": "^24.3.0",
+    "typescript": "^5.9.2"
+  }
+}
