@@ -19,8 +19,11 @@ def store_brand_node(state: GraphState) -> GraphState:
     print(f"🏪 STORE_BRAND_WORKFLOW: Processing store/brand question")
     print(f"{'='*60}")
     
-    # Set placeholder response
-    state.final_answer = "Store/brand workflow is currently not supported. This feature will handle questions about store policies, brand information, shipping, and returns."
+    # Set response using ChatServerResponse
+    from src.shared.schemas import ChatServerResponse
+    state.chat_server_response = ChatServerResponse(
+        message="I appreciate your question about our store policies. While I'm currently focused on helping you find products, you can visit our website for detailed information about shipping, returns, and other policies. In the meantime, is there anything specific you're looking to purchase today?"
+    )
     
     return state
 

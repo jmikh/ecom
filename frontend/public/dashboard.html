@@ -606,6 +606,8 @@
                         <th>Started</th>
                         <th>Duration</th>
                         <th>Messages</th>
+                        <th>Avg Latency</th>
+                        <th>Max Latency</th>
                         <th>Input Tokens</th>
                         <th>Output Tokens</th>
                         <th>Cost</th>
@@ -613,7 +615,7 @@
                 </thead>
                 <tbody id="recentSessionsBody">
                     <tr>
-                        <td colspan="7" class="loading">
+                        <td colspan="9" class="loading">
                             <div class="spinner"></div>
                             Loading sessions...
                         </td>
@@ -903,7 +905,7 @@
                 const tbody = document.getElementById('recentSessionsBody');
                 
                 if (data.length === 0) {
-                    tbody.innerHTML = '<tr><td colspan="7" style="text-align: center;">No sessions found</td></tr>';
+                    tbody.innerHTML = '<tr><td colspan="9" style="text-align: center;">No sessions found</td></tr>';
                     return;
                 }
                 
@@ -913,6 +915,12 @@
                         <td>${new Date(session.started_at).toLocaleString()}</td>
                         <td>${session.duration_minutes ? Math.round(session.duration_minutes) + ' min' : '-'}</td>
                         <td>${session.message_count || 0}</td>
+                        <td style="color: ${session.avg_latency_ms > 5000 ? '#ef4444' : session.avg_latency_ms > 3000 ? '#f59e0b' : '#10b981'}">
+                            ${session.avg_latency_ms ? (session.avg_latency_ms / 1000).toFixed(1) + 's' : '-'}
+                        </td>
+                        <td style="color: ${session.max_latency_ms > 8000 ? '#ef4444' : session.max_latency_ms > 5000 ? '#f59e0b' : '#10b981'}">
+                            ${session.max_latency_ms ? (session.max_latency_ms / 1000).toFixed(1) + 's' : '-'}
+                        </td>
                         <td>${session.input_tokens || 0}</td>
                         <td>${session.output_tokens || 0}</td>
                         <td>$${(session.estimated_cost || 0).toFixed(4)}</td>
@@ -920,7 +928,7 @@
                 `).join('');
             } catch (error) {
                 console.error('Failed to load recent sessions:', error);
-                document.getElementById('recentSessionsBody').innerHTML = '<tr><td colspan="7" style="text-align: center;">Failed to load sessions</td></tr>';
+                document.getElementById('recentSessionsBody').innerHTML = '<tr><td colspan="9" style="text-align: center;">Failed to load sessions</td></tr>';
             }
         }
         

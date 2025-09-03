@@ -1,5 +1,6 @@
 
 from src.agent.graph_state import GraphState
+from src.shared.schemas import ChatServerResponse
 
 # Global node functions for the graph workflow
 def error_node(state: GraphState) -> GraphState:
@@ -9,6 +10,9 @@ def error_node(state: GraphState) -> GraphState:
     print(f"Error: {state.error}")
     print(f"{'='*60}")
     
-    state.final_answer = "I'm sorry, but I'm experiencing technical difficulties. Please try again later."
+    # Set error response using ChatServerResponse
+    state.chat_server_response = ChatServerResponse(
+        message="I'm sorry, but I'm experiencing technical difficulties. Please try again later."
+    )
     
     return state

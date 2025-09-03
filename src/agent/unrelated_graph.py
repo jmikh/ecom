@@ -19,8 +19,11 @@ def unrelated_node(state: GraphState) -> GraphState:
     print(f"🤷 UNRELATED_WORKFLOW: Processing unrelated query")
     print(f"{'='*60}")
     
-    # Set placeholder response
-    state.final_answer = "Unrelated workflow is currently not supported. This feature will handle general conversation and redirect users to product-related topics."
+    # Set response using ChatServerResponse to redirect to product topics
+    from src.shared.schemas import ChatServerResponse
+    state.chat_server_response = ChatServerResponse(
+        message="I'm here to help you find products! Could you tell me what kind of items you're looking for today? I can help you find clothing, accessories, bags, or other products from our catalog."
+    )
     
     return state
 

@@ -154,7 +154,6 @@ class SessionManager:
             VALUES (%s, %s, NOW())
             ON CONFLICT (tenant_id, session_id) 
             DO UPDATE SET 
-                message_count = chat_sessions.message_count + 1,
                 ended_at = NOW()
             RETURNING id, session_id, started_at, message_count
         """
