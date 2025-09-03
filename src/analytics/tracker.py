@@ -20,14 +20,16 @@ class AnalyticsCallbackHandler(AsyncCallbackHandler):
     Track LLM usage and costs using actual API response data
     """
     
-    # Hardcoded pricing per 1M tokens (simple approach as discussed)
+    # Pricing per 1M tokens - using base model names
+    # The matching logic will use prefix matching
     PRICING = {
+        # Custom/internal models
+        "gpt-4.1-nano": {"input": 0.10, "output": 0.40},
         "gpt-4o-mini": {"input": 0.15, "output": 0.60},
-        "gpt-4o": {"input": 2.50, "output": 10.00},
-        "gpt-4": {"input": 30.00, "output": 60.00},
-        "gpt-4.1-nano": {"input": 0.10, "output": 0.40},  # Ultra-low cost model
-        "gpt-3.5-turbo": {"input": 0.50, "output": 1.50},
+        
+        # Embedding models
         "text-embedding-3-small": {"input": 0.02, "output": 0},
+        "text-embedding-3-large": {"input": 0.13, "output": 0},
         "text-embedding-ada-002": {"input": 0.10, "output": 0},
     }
     
@@ -57,7 +59,7 @@ class AnalyticsCallbackHandler(AsyncCallbackHandler):
         completion_tokens: int
     ) -> float:
         """
-        Calculate cost based on model and token usage
+        Calculate cost based on model and token usage using prefix matching
         
         Args:
             model_name: Name of the model used
@@ -67,25 +69,31 @@ class AnalyticsCallbackHandler(AsyncCallbackHandler):
         Returns:
             Estimated cost in USD
         """
-        # Find pricing for the model
+        # Normalize model name for matching
+        model_lower = model_name.lower()
         pricing = None
         
-        # Try exact match first
-        for model_key in self.PRICING:
-            if model_key in model_name.lower():
-                pricing = self.PRICING[model_key]
+        # Use prefix matching - check if model name starts with any pricing key
+        # Ordered by specificity (longer prefixes first)
+        pricing_keys = sorted(self.PRICING.keys(), key=len, reverse=True)
+        
+        for pricing_key in pricing_keys:
+            if model_lower.startswith(pricing_key):
+                pricing = self.PRICING[pricing_key]
                 break
         
-        # Default to zero cost if model not found
+        # Log error and default to zero cost if model not found
         if not pricing:
-            print(f"⚠️ Unknown model for pricing: {model_name}")
+            print(f"❌ ERROR: No pricing found for model '{model_name}' - defaulting to zero cost")
+            print(f"   Available pricing prefixes: {', '.join(sorted(self.PRICING.keys()))}")
             return 0.0
         
         # Calculate cost (pricing is per 1M tokens)
         input_cost = (prompt_tokens / 1_000_000) * pricing["input"]
         output_cost = (completion_tokens / 1_000_000) * pricing["output"]
+        total_cost = input_cost + output_cost
         
-        return input_cost + output_cost
+        return total_cost
     
     async def on_llm_end(
         self,
@@ -116,6 +124,9 @@ class AnalyticsCallbackHandler(AsyncCallbackHandler):
                 self.total_cost += cost
                 self.llm_calls += 1
                 
+                # Log LLM usage
+                print(f"📊 LLM Usage: {model_name} - {total_tokens} tokens, ${cost:.6f}")
+                
                 # Update session metrics in database with input/output tokens
                 self.session_manager.update_session_metrics(
                     tenant_id=self.tenant_id,
@@ -126,9 +137,6 @@ class AnalyticsCallbackHandler(AsyncCallbackHandler):
                     input_tokens=prompt_tokens,
                     output_tokens=completion_tokens
                 )
-                
-                # Log for debugging
-                print(f"📊 LLM Usage: {model_name} - {total_tokens} tokens, ${cost:.6f}")
                 
         except Exception as e:
             print(f"❌ Error tracking LLM usage: {e}")
