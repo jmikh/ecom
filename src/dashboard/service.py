@@ -181,6 +181,8 @@ class DashboardService:
                 message_count,
                 llm_call_count,
                 total_tokens_used,
+                input_tokens,
+                output_tokens,
                 estimated_cost
             FROM chat_sessions
             WHERE tenant_id = %s
@@ -210,6 +212,8 @@ class DashboardService:
                 "message_count": row["message_count"],
                 "llm_call_count": row["llm_call_count"],
                 "total_tokens_used": row["total_tokens_used"],
+                "input_tokens": row["input_tokens"] or 0,
+                "output_tokens": row["output_tokens"] or 0,
                 "estimated_cost": float(row["estimated_cost"]) if row["estimated_cost"] else 0.0
             }
             for row in results

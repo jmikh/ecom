@@ -2,6 +2,7 @@ from typing import List, Dict, Any, Optional, Sequence
 from enum import Enum
 from pydantic import BaseModel, Field
 from langchain_core.messages import BaseMessage
+from src.shared.schemas import ChatServerResponse
 
 
 
@@ -23,17 +24,6 @@ class IntentDecision(BaseModel):
         le=1.0,
         description="Confidence score of the classification (0-1)"
     )
-    context: str = Field(
-        description="Explanation of why this classification was made"
-    )
-    key_indicators: List[str] = Field(
-        default_factory=list,
-        description="Key phrases or indicators that led to this decision"
-    )
-    suggested_action: str = Field(
-        description="Suggested next action based on the intent"
-    )
-
 
 class GraphState(BaseModel):
     """State schema for the agent graph - main entry point for all workflows"""
@@ -61,12 +51,6 @@ class GraphState(BaseModel):
         description="The chat messages above but transformed into a string format to be easily fed into LLMs"
     )
     
-    # Internal processing state - separate from conversation
-    internal_messages: Sequence[BaseMessage] = Field(
-        default_factory=list,
-        description="Internal processing messages: SystemMessage, ToolMessage, LLM interactions, etc. Used for workflow processing but NOT saved to conversation history"
-    )
-    
     # Intent classification results
     intent_decision: Optional[IntentDecision] = Field(
         default=None,
@@ -79,47 +63,18 @@ class GraphState(BaseModel):
         description="Tenant information (store name, description) for context"
     )
     
-    # Workflow routing
-    active_workflow: Optional[str] = Field(
-        default=None,
-        description="Currently active workflow (product_search, product_details, store_info, etc.)"
-    )
     workflow_params: Optional[Dict[str, Any]] = Field(
         default_factory=dict,
         description="Parameters for the active workflow"
     )
     
-    # Product-related state
-    current_products: List[Dict[str, Any]] = Field(
-        default_factory=list,
-        description="Products being discussed or returned from search"
-    )
-    
-
-    
     error: Optional[str] = Field(
         default=None,
         description="error string if an error was encountered"
     )
-    tool_params: Optional[Dict[str, Any]] = Field(
-        default=None,
-        description="Parameters for tool execution"
-    )
-    
-    # Product filter extraction
-    products_filter: Optional[Any] = Field(
-        default=None,
-        description="Extracted product search filters from conversation"
-    )
-    
-    # Product search results
-    finalist_products: List[Dict[str, Any]] = Field(
-        default_factory=list,
-        description="Final list of products returned from search"
-    )
     
     # Response state
-    final_answer: Optional[str] = Field(
+    chat_server_response: Optional[ChatServerResponse] = Field(
         default=None,
-        description="Final response to user"
+        description="Structured response to send to the user"
     )

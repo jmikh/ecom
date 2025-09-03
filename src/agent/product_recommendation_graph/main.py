@@ -5,7 +5,8 @@ Encapsulates the complete product recommendation pipeline as a subgraph
 
 from langgraph.graph import StateGraph, END
 from src.agent.graph_state import GraphState
-from src.agent import get_product_filters_node, fetch_candidate_products_node, validate_recommended_products_node
+from .search_products_node import search_products_node
+from .formulate_response_node import formulate_response_node
 
 # Global compiled graph - initialized once
 _product_recommendation_graph = None
@@ -14,44 +15,33 @@ _product_recommendation_graph = None
 def create_product_recommendation_graph():
     """
     Create and compile the product recommendation workflow graph.
-    This graph handles the complete flow from filter extraction to product validation.
+    Simplified flow: search_products -> formulate_response
     """
     graph = StateGraph(GraphState)
     
-    # Add all product recommendation nodes
-    graph.add_node("get_filters", get_product_filters_node.get_product_filters_node)
-    graph.add_node("fetch_candidates", fetch_candidate_products_node.fetch_candidate_products_node)
-    graph.add_node("validate_products", validate_recommended_products_node.validate_recommended_products_node)
+    # Add simplified product recommendation nodes
+    graph.add_node("search_products", search_products_node)
+    graph.add_node("formulate_response", formulate_response_node)
     
     # Helper function to check for errors
     def has_error(state):
         return state.error is not None
     
     # Set entry point
-    graph.set_entry_point("get_filters")
+    graph.set_entry_point("search_products")
     
-    # Add edges with error handling
-    # If error occurs at any stage, exit the workflow
+    # Add edge with error handling
     graph.add_conditional_edges(
-        "get_filters",
+        "search_products",
         has_error,
         {
             True: END,  # Exit on error
-            False: "fetch_candidates"  # Continue to fetch
-        }
-    )
-    
-    graph.add_conditional_edges(
-        "fetch_candidates", 
-        has_error,
-        {
-            True: END,  # Exit on error
-            False: "validate_products"  # Continue to validation
+            False: "formulate_response"  # Continue to response formulation
         }
     )
     
     # Final node always goes to END
-    graph.add_edge("validate_products", END)
+    graph.add_edge("formulate_response", END)
     
     # Compile the graph
     return graph.compile()
@@ -79,9 +69,6 @@ async def run_product_recommendation(state: GraphState) -> GraphState:
     
     Args:
         state: Initial GraphState with session_id, tenant_id, and chat_messages
-        
-    Returns:
-        Updated GraphState with products_filter, finalist_products, and final_answer
     """
     graph = get_product_recommendation_graph()
     result = await graph.ainvoke(state.model_dump())

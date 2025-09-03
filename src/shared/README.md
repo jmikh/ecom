@@ -15,15 +15,11 @@ Core data models that ensure type safety and validation across the system:
   - Price range (min/max)
   - Discount status
   
-- **ProductRecommendationResponse**: Structured chat response
-  - List of ProductCards
-  - Explanation message
-  - Used for type-safe frontend communication
-
-- **ValidationResponse**: Product validation result
-  - Selected products
-  - Reasoning for selections
-  - Handles product filtering logic
+- **ChatServerResponse**: Generic structured chat response
+  - `first_message` (optional): Introductory text before products (e.g., "Here are some products you might like:")
+  - `products` (optional): List of ProductCards to display
+  - `last_message` (optional): Follow-up text after products (e.g., "Is there anything else I can help you with?")
+  - All fields are optional, allowing flexible response combinations
 
 ## Purpose
 
@@ -49,10 +45,16 @@ card = ProductCard(
     has_discount=False
 )
 
-# Create a recommendation response
-response = ProductRecommendationResponse(
+# Create a chat response with products
+response = ChatServerResponse(
+    first_message="Based on your search for bags, here are some options:",
     products=[card],
-    message="Here's a great canvas bag for you!"
+    last_message="These are eco-friendly and durable. Can I help you find anything else?"
+)
+
+# Or without products
+response = ChatServerResponse(
+    first_message="I couldn't find any products matching your criteria."
 )
 ```
 

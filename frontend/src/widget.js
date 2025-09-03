@@ -445,6 +445,10 @@
             const message = this.input.value.trim();
             if (!message) return;
             
+            console.log('[Widget] Sending message:', message);
+            console.log('[Widget] Session ID:', this.sessionId);
+            console.log('[Widget] Tenant ID:', this.tenantId);
+            
             // Add user message to UI
             this.addMessage(message, 'user');
             this.input.value = '';
@@ -454,18 +458,25 @@
             
             try {
                 // Use streaming endpoint
+                const requestBody = {
+                    message: message,
+                    tenant_id: this.tenantId,
+                    session_id: this.sessionId
+                };
+                console.log('[Widget] Request URL:', `${API_URL}/api/chat/stream`);
+                console.log('[Widget] Request body:', requestBody);
+                
                 const response = await fetch(`${API_URL}/api/chat/stream`, {
                     method: 'POST',
                     headers: {
                         'Content-Type': 'application/json',
                     },
                     credentials: 'include',
-                    body: JSON.stringify({
-                        message: message,
-                        tenant_id: this.tenantId,
-                        session_id: this.sessionId
-                    })
+                    body: JSON.stringify(requestBody)
                 });
+                
+                console.log('[Widget] Response status:', response.status);
+                console.log('[Widget] Response headers:', response.headers);
                 
                 if (!response.ok) {
                     throw new Error(`HTTP error! status: ${response.status}`);
@@ -485,26 +496,56 @@
                 let messageDiv = null;
                 let hasProductCards = false;
                 
+                console.log('[Widget] Starting to read stream...');
+                
                 while (true) {
                     const { done, value } = await reader.read();
-                    if (done) break;
+                    if (done) {
+                        console.log('[Widget] Stream reading complete');
+                        break;
+                    }
                     
                     const chunk = decoder.decode(value);
+                    console.log('[Widget] Received chunk:', chunk);
                     const lines = chunk.split('\n');
                     
                     for (const line of lines) {
                         if (line.startsWith('data: ')) {
                             try {
                                 const data = JSON.parse(line.slice(6));
+                                console.log('[Widget] Parsed data:', data);
                                 
                                 if (data.error) {
+                                    console.error('[Widget] Error in response:', data.error);
                                     this.hideTyping();
                                     this.addMessage('Sorry, an error occurred. Please try again.', 'assistant');
                                     return;
                                 }
                                 
-                                // Handle product cards response
+                                // Handle ChatServerResponse format
+                                if (data.type === 'chat_response' && data.data) {
+                                    console.log('[Widget] Handling chat_response:', data.data);
+                                    this.hideTyping();
+                                    hasProductCards = true;
+                                    
+                                    const response = data.data;
+                                    
+                                    // Display message if present
+                                    if (response.message) {
+                                        console.log('[Widget] Adding message:', response.message);
+                                        this.addMessage(response.message, 'assistant');
+                                    }
+                                    
+                                    // Display product cards if present
+                                    if (response.products && response.products.length > 0) {
+                                        console.log('[Widget] Adding product cards:', response.products.length, 'products');
+                                        this.addProductCards(response.products);
+                                    }
+                                }
+                                
+                                // Handle legacy product_cards format (for backward compatibility if needed)
                                 if (data.type === 'product_cards' && data.data) {
+                                    console.log('[Widget] Handling legacy product_cards format');
                                     this.hideTyping();
                                     hasProductCards = true;
                                     
@@ -521,6 +562,7 @@
                                 
                                 // Handle regular text chunks (only if we haven't shown product cards)
                                 if (data.chunk && !hasProductCards) {
+                                    console.log('[Widget] Handling text chunk:', data.chunk);
                                     assistantMessage += data.chunk;
                                     
                                     // Create or update message
@@ -533,16 +575,17 @@
                                 }
                                 
                                 if (data.done) {
+                                    console.log('[Widget] Response marked as done');
                                     this.hideTyping();
                                 }
                             } catch (e) {
-                                console.error('Failed to parse SSE data:', e);
+                                console.error('[Widget] Failed to parse SSE data:', e, 'Line:', line);
                             }
                         }
                     }
                 }
             } catch (error) {
-                console.error('Failed to send message:', error);
+                console.error('[Widget] Failed to send message:', error);
                 this.hideTyping();
                 this.addMessage('Sorry, I encountered an error. Please try again.', 'assistant');
             }

@@ -68,11 +68,16 @@ def get_main_graph() -> StateGraph:
 
     # Add edges from workflow nodes to END
     # All subgraphs handle their own internal routing
-    graph.add_edge("product_recommendation", END)
-    graph.add_edge("product_inquiry", END)
-    graph.add_edge("store_brand", END)
-    graph.add_edge("unrelated", END)
-    graph.add_edge("error", END)
+    workflow_nodes = [
+        "product_recommendation",
+        "product_inquiry", 
+        "store_brand",
+        "unrelated",
+        "error"
+    ]
+    
+    for node in workflow_nodes:
+        graph.add_edge(node, END)
     
     _compiled_graph = graph.compile()
     return _compiled_graph

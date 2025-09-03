@@ -10,6 +10,7 @@ from typing import List, Optional
 class ProductCard(BaseModel):
     """Single product card with all display information"""
     id: int = Field(description="Product ID from database")
+    shopify_id: Optional[str] = Field(None, description="Shopify product ID")
     name: str = Field(description="Product name/title")
     vendor: str = Field(description="Brand or vendor name")
     image_url: Optional[str] = Field(None, description="Primary product image URL")
@@ -22,14 +23,15 @@ class ProductCard(BaseModel):
         from_attributes = True
 
 
-class ProductRecommendationResponse(BaseModel):
-    """Response containing product cards and reasoning"""
-    products: List[ProductCard] = Field(
-        description="List of recommended products",
-        default_factory=list
+class ChatServerResponse(BaseModel):
+    """Generic chat server response that can contain text and/or products"""
+    message: Optional[str] = Field(
+        None,
+        description="Message to display to the user"
     )
-    message: str = Field(
-        description="LLM reasoning for these recommendations"
+    products: Optional[List[ProductCard]] = Field(
+        None,
+        description="List of product cards to display"
     )
     
     class Config:

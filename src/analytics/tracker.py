@@ -25,6 +25,7 @@ class AnalyticsCallbackHandler(AsyncCallbackHandler):
         "gpt-4o-mini": {"input": 0.15, "output": 0.60},
         "gpt-4o": {"input": 2.50, "output": 10.00},
         "gpt-4": {"input": 30.00, "output": 60.00},
+        "gpt-4.1-nano": {"input": 0.10, "output": 0.40},  # Ultra-low cost model
         "gpt-3.5-turbo": {"input": 0.50, "output": 1.50},
         "text-embedding-3-small": {"input": 0.02, "output": 0},
         "text-embedding-ada-002": {"input": 0.10, "output": 0},
@@ -115,13 +116,15 @@ class AnalyticsCallbackHandler(AsyncCallbackHandler):
                 self.total_cost += cost
                 self.llm_calls += 1
                 
-                # Update session metrics in database
+                # Update session metrics in database with input/output tokens
                 self.session_manager.update_session_metrics(
                     tenant_id=self.tenant_id,
                     session_id=self.session_id,
                     tokens_used=total_tokens,
                     cost=cost,
-                    llm_calls=1
+                    llm_calls=1,
+                    input_tokens=prompt_tokens,
+                    output_tokens=completion_tokens
                 )
                 
                 # Log for debugging

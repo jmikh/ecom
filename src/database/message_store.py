@@ -234,7 +234,9 @@ class SessionManager:
         session_id: str,
         tokens_used: Optional[int] = None,
         cost: Optional[float] = None,
-        llm_calls: int = 1
+        llm_calls: int = 1,
+        input_tokens: Optional[int] = None,
+        output_tokens: Optional[int] = None
     ):
         """
         Update session metrics after LLM call
@@ -242,9 +244,11 @@ class SessionManager:
         Args:
             tenant_id: Tenant UUID
             session_id: Session identifier
-            tokens_used: Tokens used in this call
+            tokens_used: Total tokens used in this call
             cost: Cost of this call
             llm_calls: Number of LLM calls (default 1)
+            input_tokens: Input/prompt tokens used
+            output_tokens: Output/completion tokens used
         """
         query = """
             UPDATE chat_sessions
@@ -252,13 +256,15 @@ class SessionManager:
                 llm_call_count = llm_call_count + %s,
                 total_tokens_used = total_tokens_used + COALESCE(%s, 0),
                 estimated_cost = estimated_cost + COALESCE(%s, 0),
+                input_tokens = input_tokens + COALESCE(%s, 0),
+                output_tokens = output_tokens + COALESCE(%s, 0),
                 ended_at = NOW()
             WHERE tenant_id = %s AND session_id = %s
         """
         
         self.db.run_write(
             query,
-            (llm_calls, tokens_used or 0, cost or 0, tenant_id, session_id),
+            (llm_calls, tokens_used or 0, cost or 0, input_tokens or 0, output_tokens or 0, tenant_id, session_id),
             tenant_id=tenant_id
         )
     

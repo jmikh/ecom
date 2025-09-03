@@ -11,6 +11,7 @@ from src.agent.graph_state import GraphState
 from src.database.message_store import SessionManager, MessageStore, ConversationMemory
 from src.database import get_database
 from src.analytics.tracker import AnalyticsCallbackHandler
+from src.shared.schemas import ChatServerResponse
 from langchain_core.messages import HumanMessage
 
 
@@ -59,13 +60,20 @@ class WebChatService:
             config={"callbacks": [analytics_handler]}
         )
         
-        # Extract response
-        if result.get('final_answer'):
-            try:
-                validation_data = json.loads(result['final_answer'])
-                response = self._format_product_response(validation_data)
-            except json.JSONDecodeError:
-                response = result['final_answer']
+        # Extract response from chat_server_response
+        if result.get('chat_server_response'):
+            chat_response = result['chat_server_response']
+            
+            # Build text representation
+            text_parts = []
+            if chat_response.first_message:
+                text_parts.append(chat_response.first_message)
+            if chat_response.products:
+                text_parts.append(f"[Showing {len(chat_response.products)} products]")
+            if chat_response.last_message:
+                text_parts.append(chat_response.last_message)
+            
+            response = " ".join(text_parts) if text_parts else "Here are my recommendations"
         else:
             response = 'I apologize, but I was unable to generate a response. Please try again.'
         
@@ -104,81 +112,43 @@ class WebChatService:
                 config={"callbacks": [analytics_handler]}
             )
             
-            # Extract response
-            if result.get('final_answer'):
-                try:
-                    validation_data = json.loads(result['final_answer'])
-                    
-                    # Check if this is a ProductRecommendationResponse structure
-                    # Must have both 'products' list and 'message' string, and products must be a list of dicts with expected fields
-                    is_product_recommendation = (
-                        isinstance(validation_data.get('products'), list) and
-                        isinstance(validation_data.get('message'), str) and
-                        len(validation_data.get('products', [])) > 0 and
-                        all(
-                            isinstance(p, dict) and 
-                            'id' in p and 
-                            'name' in p and 
-                            'price_min' in p
-                            for p in validation_data.get('products', [])
-                        )
-                    )
-                    
-                    if is_product_recommendation:
-                        # Send structured data in a single chunk with type indicator
-                        yield f"data: {json.dumps({'type': 'product_cards', 'data': validation_data, 'done': False})}\n\n"
-                        yield f"data: {json.dumps({'chunk': '', 'done': True})}\n\n"
-                        
-                        # Save message with structured product data
-                        memory.add_message(
-                            validation_data.get('message', 'Here are my recommendations'), 
-                            "assistant",
-                            structured_data=validation_data
-                        )
-                        return
-                    else:
-                        # Not a product recommendation, format as text
-                        response = self._format_product_response(validation_data)
-                        
-                except json.JSONDecodeError:
-                    response = result['final_answer']
+            # Extract response from chat_server_response
+            if result.get('chat_server_response'):
+                chat_response = result['chat_server_response']
+                
+                # Send as structured data to frontend
+                yield f"data: {json.dumps({'type': 'chat_response', 'data': chat_response.model_dump(), 'done': False})}\n\n"
+                yield f"data: {json.dumps({'chunk': '', 'done': True})}\n\n"
+                
+                # Save the entire response structure to memory
+                # This preserves all product details for future reference
+                memory.add_message(
+                    json.dumps(chat_response.model_dump()),
+                    "assistant",
+                    structured_data=chat_response.model_dump()
+                )
             else:
+                # No structured response, send error message
                 response = 'I apologize, but I was unable to generate a response.'
-            
-            # Save to memory
-            memory.add_message(response, "assistant")
-            
-            # Stream response in chunks for text responses
-            chunk_size = 50  # Characters per chunk
-            for i in range(0, len(response), chunk_size):
-                chunk = response[i:i + chunk_size]
-                yield f"data: {json.dumps({'chunk': chunk, 'done': False})}\n\n"
-                await asyncio.sleep(0.05)  # Small delay for streaming effect
-            
-            # Send completion signal
-            yield f"data: {json.dumps({'chunk': '', 'done': True})}\n\n"
+                
+                # Save to memory
+                memory.add_message(response, "assistant")
+                
+                # Stream error message in chunks
+                chunk_size = 50
+                for i in range(0, len(response), chunk_size):
+                    chunk = response[i:i + chunk_size]
+                    yield f"data: {json.dumps({'chunk': chunk, 'done': False})}\n\n"
+                    await asyncio.sleep(0.05)
+                
+                # Send completion signal
+                yield f"data: {json.dumps({'chunk': '', 'done': True})}\n\n"
             
         except Exception as e:
             error_msg = f"Error processing message: {str(e)}"
             yield f"data: {json.dumps({'error': error_msg, 'done': True})}\n\n"
     
-    def _format_product_response(self, response_data):
-        """Format product recommendation response for web display"""
-        # Check if this is the new ProductRecommendationResponse format
-        if 'products' in response_data and 'message' in response_data:
-            # Return the structured data as JSON for the frontend to render
-            return json.dumps(response_data)
-        
-        # Legacy format fallback (can be removed later)
-        lines = []
-        for product in response_data.get('validated_products', []):
-            status = "✅" if product['fits_criteria'] else "❌"
-            lines.append(f"{status} **Product #{product['product_id']}**: {product['reason']}")
-        
-        if response_data.get('overall_summary'):
-            lines.append(f"\n**Summary**: {response_data['overall_summary']}")
-        
-        return "\n\n".join(lines)
+    # Removed _format_product_response method - no longer needed
     
     def get_conversation_history(self, session_id: str, tenant_id: str) -> list:
         """Get conversation history for a session"""

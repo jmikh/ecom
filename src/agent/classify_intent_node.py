@@ -134,9 +134,7 @@ async def classify_intent_node(state: GraphState) -> GraphState:
     messages = [system_message, classification_message]
     
     try:
-        state.internal_messages.extend(messages)
         state.intent_decision = llm.invoke(messages)
-        state.internal_messages.append(AIMessage(content=str(state.intent_decision)))
         print(f"🎯 Classify Intent: {state.intent_decision}")
         
     except Exception as e:
