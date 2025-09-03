@@ -183,7 +183,10 @@ class DashboardService:
                 total_tokens_used,
                 input_tokens,
                 output_tokens,
-                estimated_cost
+                estimated_cost,
+                avg_latency_ms,
+                max_latency_ms,
+                min_latency_ms
             FROM chat_sessions
             WHERE tenant_id = %s
             ORDER BY started_at DESC
@@ -214,7 +217,10 @@ class DashboardService:
                 "total_tokens_used": row["total_tokens_used"],
                 "input_tokens": row["input_tokens"] or 0,
                 "output_tokens": row["output_tokens"] or 0,
-                "estimated_cost": float(row["estimated_cost"]) if row["estimated_cost"] else 0.0
+                "estimated_cost": float(row["estimated_cost"]) if row["estimated_cost"] else 0.0,
+                "avg_latency_ms": row.get("avg_latency_ms"),
+                "max_latency_ms": row.get("max_latency_ms"),
+                "min_latency_ms": row.get("min_latency_ms")
             }
             for row in results
         ]
@@ -256,7 +262,8 @@ class DashboardService:
                 structured_data,
                 model_used,
                 cost,
-                created_at
+                created_at,
+                latency_ms
             FROM chat_messages
             WHERE tenant_id = %s AND session_id = %s
             ORDER BY created_at ASC
@@ -271,7 +278,123 @@ class DashboardService:
                 "structured_data": msg["structured_data"],  # This will be JSONB from PostgreSQL
                 "model_used": msg["model_used"],
                 "cost": float(msg["cost"]) if msg["cost"] else 0,
-                "created_at": msg["created_at"].isoformat() if msg["created_at"] else None
+                "created_at": msg["created_at"].isoformat() if msg["created_at"] else None,
+                "latency_ms": msg["latency_ms"]
             }
             for msg in messages
         ]
+    
+    def get_latency_metrics(self, days: int = 7) -> Dict[str, Any]:
+        """
+        Get latency metrics for assistant messages
+        
+        Returns:
+            Dictionary with average latency, worst latency per thread, and percentiles
+        """
+        # Get average latency across all assistant messages
+        avg_query = """
+            SELECT 
+                AVG(latency_ms) as avg_latency,
+                MIN(latency_ms) as min_latency,
+                MAX(latency_ms) as max_latency,
+                COUNT(*) as message_count
+            FROM chat_messages
+            WHERE tenant_id = %s 
+                AND role = 'assistant' 
+                AND latency_ms IS NOT NULL
+                AND created_at >= NOW() - INTERVAL '%s days'
+        """
+        
+        avg_result = self.db.run_read(avg_query, (self.tenant_id, days))
+        
+        # Get worst latency per thread/session
+        worst_per_thread_query = """
+            SELECT 
+                session_id,
+                MAX(latency_ms) as max_latency,
+                AVG(latency_ms) as avg_latency,
+                COUNT(*) as message_count
+            FROM chat_messages
+            WHERE tenant_id = %s 
+                AND role = 'assistant' 
+                AND latency_ms IS NOT NULL
+                AND created_at >= NOW() - INTERVAL '%s days'
+            GROUP BY session_id
+            ORDER BY max_latency DESC
+            LIMIT 10
+        """
+        
+        worst_threads = self.db.run_read(worst_per_thread_query, (self.tenant_id, days))
+        
+        # Get latency percentiles
+        percentiles_query = """
+            SELECT 
+                PERCENTILE_CONT(0.50) WITHIN GROUP (ORDER BY latency_ms) as p50,
+                PERCENTILE_CONT(0.75) WITHIN GROUP (ORDER BY latency_ms) as p75,
+                PERCENTILE_CONT(0.90) WITHIN GROUP (ORDER BY latency_ms) as p90,
+                PERCENTILE_CONT(0.95) WITHIN GROUP (ORDER BY latency_ms) as p95,
+                PERCENTILE_CONT(0.99) WITHIN GROUP (ORDER BY latency_ms) as p99
+            FROM chat_messages
+            WHERE tenant_id = %s 
+                AND role = 'assistant' 
+                AND latency_ms IS NOT NULL
+                AND created_at >= NOW() - INTERVAL '%s days'
+        """
+        
+        percentiles = self.db.run_read(percentiles_query, (self.tenant_id, days))
+        
+        # Get latency over time for graph
+        time_series_query = """
+            SELECT 
+                DATE_TRUNC('hour', created_at) as hour,
+                AVG(latency_ms) as avg_latency,
+                PERCENTILE_CONT(0.50) WITHIN GROUP (ORDER BY latency_ms) as p50,
+                PERCENTILE_CONT(0.90) WITHIN GROUP (ORDER BY latency_ms) as p90,
+                PERCENTILE_CONT(0.99) WITHIN GROUP (ORDER BY latency_ms) as p99,
+                COUNT(*) as message_count
+            FROM chat_messages
+            WHERE tenant_id = %s 
+                AND role = 'assistant' 
+                AND latency_ms IS NOT NULL
+                AND created_at >= NOW() - INTERVAL '%s days'
+            GROUP BY hour
+            ORDER BY hour ASC
+        """
+        
+        time_series = self.db.run_read(time_series_query, (self.tenant_id, days))
+        
+        return {
+            "summary": {
+                "avg_latency_ms": float(avg_result[0]["avg_latency"]) if avg_result and avg_result[0]["avg_latency"] else 0,
+                "min_latency_ms": avg_result[0]["min_latency"] if avg_result else 0,
+                "max_latency_ms": avg_result[0]["max_latency"] if avg_result else 0,
+                "message_count": avg_result[0]["message_count"] if avg_result else 0
+            },
+            "worst_threads": [
+                {
+                    "session_id": thread["session_id"],
+                    "max_latency_ms": thread["max_latency"],
+                    "avg_latency_ms": float(thread["avg_latency"]) if thread["avg_latency"] else 0,
+                    "message_count": thread["message_count"]
+                }
+                for thread in worst_threads
+            ],
+            "percentiles": {
+                "p50": float(percentiles[0]["p50"]) if percentiles and percentiles[0]["p50"] else 0,
+                "p75": float(percentiles[0]["p75"]) if percentiles and percentiles[0]["p75"] else 0,
+                "p90": float(percentiles[0]["p90"]) if percentiles and percentiles[0]["p90"] else 0,
+                "p95": float(percentiles[0]["p95"]) if percentiles and percentiles[0]["p95"] else 0,
+                "p99": float(percentiles[0]["p99"]) if percentiles and percentiles[0]["p99"] else 0
+            },
+            "time_series": [
+                {
+                    "hour": row["hour"].isoformat() if row["hour"] else None,
+                    "avg_latency_ms": float(row["avg_latency"]) if row["avg_latency"] else 0,
+                    "p50": float(row["p50"]) if row["p50"] else 0,
+                    "p90": float(row["p90"]) if row["p90"] else 0,
+                    "p99": float(row["p99"]) if row["p99"] else 0,
+                    "message_count": row["message_count"]
+                }
+                for row in time_series
+            ]
+        }

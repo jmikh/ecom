@@ -185,34 +185,104 @@ def setup_database():
         WITH (lists = 100)
     """)
     
-    # Create essential indexes for the tenants table
-    cursor.execute("CREATE INDEX IF NOT EXISTS idx_tenants_name ON tenants (name)")
-    
-    # Create essential indexes for the products table
+    # ====== PRODUCTS TABLE INDEXES ======
+    # Multi-tenant isolation - used in every query
     cursor.execute("CREATE INDEX IF NOT EXISTS idx_products_tenant ON products (tenant_id)")
+    
+    # Composite index for common ID lookups with tenant isolation
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_products_tenant_id ON products (tenant_id, id)")
+    
+    # Individual filter indexes for search functionality
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_products_product_type ON products (product_type)")  # Category filtering
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_products_min_price ON products (min_price)")       # Price range queries
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_products_max_price ON products (max_price)")       # Price range queries
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_products_has_discount ON products (has_discount)") # Sale items filter
+    
+    # Composite covering index for filter searches (most common query pattern)
+    cursor.execute("""
+        CREATE INDEX IF NOT EXISTS idx_products_search_filters 
+        ON products (tenant_id, product_type, has_discount, min_price, max_price)
+        INCLUDE (id, title, vendor)
+    """)
+    
+    # Shopify sync - keep for product ingestion/updates
     cursor.execute("CREATE INDEX IF NOT EXISTS idx_products_shopify_id ON products (shopify_id)")
-    cursor.execute("CREATE INDEX IF NOT EXISTS idx_products_product_type ON products (product_type)")
-    cursor.execute("CREATE INDEX IF NOT EXISTS idx_products_min_price ON products (min_price)")
-    cursor.execute("CREATE INDEX IF NOT EXISTS idx_products_max_price ON products (max_price)")
-    cursor.execute("CREATE INDEX IF NOT EXISTS idx_products_has_discount ON products (has_discount)")
-    cursor.execute("CREATE INDEX IF NOT EXISTS idx_products_options_gin ON products USING GIN (options jsonb_path_ops)")
     
-    # Create essential indexes for product_variants table
-    cursor.execute("CREATE INDEX IF NOT EXISTS idx_variants_tenant ON product_variants (tenant_id)")
+    # ====== PRODUCT_VARIANTS TABLE INDEXES ======
+    # Only essential indexes - most queries go through products table
     cursor.execute("CREATE INDEX IF NOT EXISTS idx_variants_product_id ON product_variants (product_id)")
+    # Shopify sync indexes - keep minimal set for ingestion
     cursor.execute("CREATE INDEX IF NOT EXISTS idx_variants_shopify_variant_id ON product_variants (shopify_variant_id)")
-    cursor.execute("CREATE INDEX IF NOT EXISTS idx_variants_shopify_product_id ON product_variants (shopify_product_id)")
-    cursor.execute("CREATE INDEX IF NOT EXISTS idx_variants_shopify_image_id ON product_variants (shopify_image_id)")
-    cursor.execute("CREATE INDEX IF NOT EXISTS idx_variants_sku ON product_variants (sku)")
-    cursor.execute("CREATE INDEX IF NOT EXISTS idx_variants_price ON product_variants (price)")
     
-    # Create essential indexes for product_images table
+    # ====== PRODUCT_IMAGES TABLE INDEXES ======
+    # Multi-tenant isolation
     cursor.execute("CREATE INDEX IF NOT EXISTS idx_images_tenant ON product_images (tenant_id)")
-    cursor.execute("CREATE INDEX IF NOT EXISTS idx_images_product_id ON product_images (product_id)")
+    
+    # Optimized for fetching primary image (position=1) in product queries
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_images_product_position ON product_images (product_id, position)")
+    
+    # Shopify sync - keep for image updates
     cursor.execute("CREATE INDEX IF NOT EXISTS idx_images_shopify_image_id ON product_images (shopify_image_id)")
-    cursor.execute("CREATE INDEX IF NOT EXISTS idx_images_shopify_product_id ON product_images (shopify_product_id)")
     
     # Indexes for embedding columns now part of products table
+    
+    # Create chat_sessions table
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS chat_sessions (
+            id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+            tenant_id UUID REFERENCES tenants(tenant_id) ON DELETE CASCADE,
+            session_id VARCHAR(255) NOT NULL,
+            started_at TIMESTAMPTZ DEFAULT now(),
+            ended_at TIMESTAMPTZ,
+            message_count INTEGER DEFAULT 0,
+            llm_call_count INTEGER DEFAULT 0,
+            total_tokens_used INTEGER DEFAULT 0,
+            estimated_cost NUMERIC(10,4) DEFAULT 0,
+            input_tokens INTEGER DEFAULT 0,
+            output_tokens INTEGER DEFAULT 0,
+            avg_latency_ms INTEGER,
+            max_latency_ms INTEGER,
+            min_latency_ms INTEGER,
+            UNIQUE(tenant_id, session_id)
+        )
+    """)
+    
+    # Create chat_messages table
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS chat_messages (
+            id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+            tenant_id UUID REFERENCES tenants(tenant_id) ON DELETE CASCADE,
+            session_id VARCHAR(255) NOT NULL,
+            role VARCHAR(20) NOT NULL,
+            content TEXT NOT NULL,
+            intent VARCHAR(100),
+            prompt_tokens INTEGER,
+            completion_tokens INTEGER,
+            total_tokens INTEGER,
+            model_used VARCHAR(100),
+            cost NUMERIC(10,6),
+            created_at TIMESTAMPTZ DEFAULT now(),
+            structured_data JSONB,
+            latency_ms INTEGER
+        )
+    """)
+    
+    # ====== CHAT TABLES INDEXES ======
+    # Session queries - fetch recent sessions for a tenant
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_sessions_tenant ON chat_sessions (tenant_id, started_at DESC)")
+    
+    # Conversation history - fetch messages for a specific session
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_session_messages ON chat_messages (tenant_id, session_id, created_at DESC)")
+    
+    # Recent activity - fetch recent messages across all sessions
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_recent_messages ON chat_messages (tenant_id, created_at DESC)")
+    
+    # Latency analytics - partial index for assistant message performance metrics
+    cursor.execute("""
+        CREATE INDEX IF NOT EXISTS idx_chat_messages_latency 
+        ON chat_messages(tenant_id, role, latency_ms) 
+        WHERE role = 'assistant'
+    """)
     
     conn.commit()
     cursor.close()

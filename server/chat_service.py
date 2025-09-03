@@ -39,6 +39,9 @@ class WebChatService:
     
     async def process_message(self, message: str, session_id: str, tenant_id: str) -> str:
         """Process a single message and return response"""
+        import time
+        start_time = time.time()
+        
         memory = ConversationMemory(session_id, tenant_id)
         
         # Add user message to memory
@@ -77,8 +80,13 @@ class WebChatService:
         else:
             response = 'I apologize, but I was unable to generate a response. Please try again.'
         
+        # Calculate latency
+        import time
+        end_time = time.time()
+        latency_ms = int((end_time - start_time) * 1000)
+        
         # Save to memory
-        memory.add_message(response, "assistant")
+        memory.add_message(response, "assistant", latency_ms=latency_ms)
         
         return response
     
@@ -89,6 +97,9 @@ class WebChatService:
         tenant_id: str
     ) -> AsyncGenerator[str, None]:
         """Process message and stream response chunks"""
+        import time
+        start_time = time.time()
+        
         memory = ConversationMemory(session_id, tenant_id)
         
         # Add user message to memory
@@ -120,19 +131,33 @@ class WebChatService:
                 yield f"data: {json.dumps({'type': 'chat_response', 'data': chat_response.model_dump(), 'done': False})}\n\n"
                 yield f"data: {json.dumps({'chunk': '', 'done': True})}\n\n"
                 
-                # Save the entire response structure to memory
-                # This preserves all product details for future reference
+                # Save the message text to memory (without JSON)
+                # The structured_data field preserves all product details
+                # Extract just the message text for the content field
+                message_text = chat_response.message if hasattr(chat_response, 'message') else ''
+                
+                # Calculate latency
+                import time
+                end_time = time.time()
+                latency_ms = int((end_time - start_time) * 1000)
+                
                 memory.add_message(
-                    json.dumps(chat_response.model_dump()),
+                    message_text,  # Just the text message, no JSON
                     "assistant",
-                    structured_data=chat_response.model_dump()
+                    structured_data=chat_response.model_dump(),  # Full structured data including products
+                    latency_ms=latency_ms
                 )
             else:
                 # No structured response, send error message
                 response = 'I apologize, but I was unable to generate a response.'
                 
+                # Calculate latency
+                import time
+                end_time = time.time()
+                latency_ms = int((end_time - start_time) * 1000)
+                
                 # Save to memory
-                memory.add_message(response, "assistant")
+                memory.add_message(response, "assistant", latency_ms=latency_ms)
                 
                 # Stream error message in chunks
                 chunk_size = 50

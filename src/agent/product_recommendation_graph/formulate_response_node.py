@@ -7,7 +7,7 @@ from langsmith import traceable
 from src.agent.graph_state import GraphState
 from src.agent.config import config
 from src.shared.schemas import ProductCard, ChatServerResponse
-from src.agent.common import get_products_details_by_ids
+from src.agent.common import get_products_details_by_ids, fetch_product_cards_by_ids
 
 
 class LLMProductValidation(BaseModel):
@@ -84,24 +84,12 @@ If these products don't perfectly match what they asked for, be honest about it 
         # Get structured response
         validation_response = llm.invoke(messages)
         
-        # Build ProductCard objects from products matching the LLM's selected IDs
-        product_cards = []
-        products_by_id = {p['id']: p for p in products_with_details}
-        
-        for product_id in validation_response.product_ids:
-            if product_id in products_by_id:
-                product = products_by_id[product_id]
-                card = ProductCard(
-                    id=product['id'],
-                    shopify_id=str(product['shopify_id']) if product.get('shopify_id') else None,
-                    name=product.get('title', ''),
-                    vendor=product.get('vendor', ''),
-                    image_url=product.get('image_url'),
-                    price_min=float(product.get('min_price', 0)),
-                    price_max=float(product.get('max_price', 0)),
-                    has_discount=product.get('has_discount', False)
-                )
-                product_cards.append(card)
+        # Fetch ProductCard objects for the LLM's selected product IDs
+        # This function handles all conversions and None values properly
+        product_cards = fetch_product_cards_by_ids(
+            validation_response.product_ids, 
+            state.tenant_id
+        )
         
         # Create the final structured response with single message field
         state.chat_server_response = ChatServerResponse(

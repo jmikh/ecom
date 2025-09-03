@@ -98,6 +98,23 @@ async def get_cost_breakdown(
     return costs
 
 
+@router.get("/{tenant_id}/latency", response_model=Dict[str, Any])
+async def get_latency_metrics(
+    tenant_id: str,
+    days: int = Query(7, ge=1, le=90, description="Number of days to look back")
+):
+    """
+    Get latency metrics for assistant messages including:
+    - Average latency across all messages
+    - Worst latency per thread
+    - Latency percentiles (P50, P75, P90, P95, P99)
+    - Time series data for latency graphs
+    """
+    service = DashboardService(tenant_id)
+    metrics = service.get_latency_metrics(days)
+    return metrics
+
+
 @router.get("/{tenant_id}/products/top", response_model=List[Dict[str, Any]])
 async def get_top_products(
     tenant_id: str,

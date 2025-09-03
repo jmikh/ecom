@@ -17,62 +17,6 @@ class MessageStore:
     def __init__(self):
         self.db = get_database()
     
-    async def add_message(
-        self,
-        tenant_id: str,
-        session_id: str,
-        role: str,
-        content: str,
-        intent: Optional[str] = None,
-        prompt_tokens: Optional[int] = None,
-        completion_tokens: Optional[int] = None,
-        total_tokens: Optional[int] = None,
-        model_used: Optional[str] = None,
-        cost: Optional[float] = None
-    ) -> str:
-        """
-        Add a message to the conversation history
-        
-        Args:
-            tenant_id: Tenant UUID
-            session_id: Session identifier
-            role: Message role (user, assistant, system)
-            content: Message content
-            intent: Classified intent (for user messages)
-            prompt_tokens: Input tokens used
-            completion_tokens: Output tokens used
-            total_tokens: Total tokens (prompt + completion)
-            model_used: Model name used for generation
-            cost: Estimated cost of the API call
-            
-        Returns:
-            Message ID
-        """
-        message_id = str(uuid4())
-        
-        query = """
-            INSERT INTO chat_messages (
-                id, tenant_id, session_id, role, content, intent,
-                prompt_tokens, completion_tokens, total_tokens,
-                model_used, cost, created_at
-            ) VALUES (
-                %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, NOW()
-            )
-            RETURNING id
-        """
-        
-        result = self.db.run_write(
-            query,
-            (
-                message_id, tenant_id, session_id, role, content, intent,
-                prompt_tokens, completion_tokens, total_tokens,
-                model_used, cost
-            ),
-            tenant_id=tenant_id
-        )
-        
-        return result[0]['id'] if result else message_id
-    
     def get_conversation_context(
         self,
         tenant_id: str,
@@ -91,7 +35,7 @@ class MessageStore:
             List of messages in chronological order (oldest first)
         """
         query = """
-            SELECT role, content, created_at
+            SELECT role, content, created_at, structured_data
             FROM chat_messages
             WHERE tenant_id = %s AND session_id = %s
             ORDER BY created_at DESC
@@ -109,11 +53,13 @@ class MessageStore:
         messages.reverse()
         
         # Format for LangChain compatibility
+        # Include structured_data for assistant messages so LLM can see products shown
         return [
             {
                 "role": msg["role"],
                 "content": msg["content"],
-                "timestamp": msg["created_at"].isoformat() if msg["created_at"] else None
+                "timestamp": msg["created_at"].isoformat() if msg["created_at"] else None,
+                "structured_data": msg.get("structured_data")  # Include product data if present
             }
             for msg in messages
         ]
@@ -307,16 +253,40 @@ class ConversationMemory:
         self.tenant_id = tenant_id
         self.store = MessageStore()
     
-    def add_message(self, content: str, role: str, structured_data: Optional[Dict[str, Any]] = None):
+    def add_message(self, content: str, role: str, structured_data: Optional[Dict[str, Any]] = None, 
+                   latency_ms: Optional[int] = None):
         """Add a message to conversation history - synchronous version"""
         # Since we're in an async context already, we'll use the synchronous database operations
         db = get_database()
         
+        # Calculate latency for assistant messages if not provided
+        if role == "assistant" and latency_ms is None:
+            # Get the timestamp of the most recent user message
+            query = """
+                SELECT created_at 
+                FROM chat_messages 
+                WHERE tenant_id = %s AND session_id = %s AND role = 'user'
+                ORDER BY created_at DESC
+                LIMIT 1
+            """
+            result = db.run_read(
+                query,
+                (self.tenant_id, self.session_id),
+                tenant_id=self.tenant_id
+            )
+            
+            if result:
+                user_msg_time = result[0]["created_at"]
+                # Calculate latency in milliseconds
+                from datetime import datetime
+                now = datetime.now(user_msg_time.tzinfo)
+                latency_ms = int((now - user_msg_time).total_seconds() * 1000)
+        
         # Build the query to add a message
         query = """
             INSERT INTO chat_messages (
-                tenant_id, session_id, role, content, structured_data, created_at
-            ) VALUES (%s, %s, %s, %s, %s, NOW())
+                tenant_id, session_id, role, content, structured_data, created_at, latency_ms
+            ) VALUES (%s, %s, %s, %s, %s, NOW(), %s)
         """
         
         # Convert structured_data to JSON if provided
@@ -325,23 +295,46 @@ class ConversationMemory:
         try:
             db.run_write(
                 query,
-                (self.tenant_id, self.session_id, role, content, structured_json),
+                (self.tenant_id, self.session_id, role, content, structured_json, latency_ms),
                 tenant_id=self.tenant_id
             )
             
-            # Also update session activity
-            session_query = """
-                UPDATE chat_sessions 
-                SET 
-                    ended_at = NOW(),
-                    message_count = COALESCE(message_count, 0) + 1
-                WHERE tenant_id = %s AND session_id = %s
-            """
-            db.run_write(
-                session_query,
-                (self.tenant_id, self.session_id),
-                tenant_id=self.tenant_id
-            )
+            # Also update session activity and latency metrics for assistant messages
+            if role == "assistant" and latency_ms is not None:
+                session_query = """
+                    UPDATE chat_sessions 
+                    SET 
+                        ended_at = NOW(),
+                        message_count = COALESCE(message_count, 0) + 1,
+                        avg_latency_ms = (
+                            CASE 
+                                WHEN avg_latency_ms IS NULL THEN %s
+                                ELSE (avg_latency_ms * (message_count - 1) + %s) / message_count
+                            END
+                        ),
+                        max_latency_ms = GREATEST(COALESCE(max_latency_ms, %s), %s),
+                        min_latency_ms = LEAST(COALESCE(min_latency_ms, %s), %s)
+                    WHERE tenant_id = %s AND session_id = %s
+                """
+                db.run_write(
+                    session_query,
+                    (latency_ms, latency_ms, latency_ms, latency_ms, latency_ms, latency_ms, 
+                     self.tenant_id, self.session_id),
+                    tenant_id=self.tenant_id
+                )
+            else:
+                session_query = """
+                    UPDATE chat_sessions 
+                    SET 
+                        ended_at = NOW(),
+                        message_count = COALESCE(message_count, 0) + 1
+                    WHERE tenant_id = %s AND session_id = %s
+                """
+                db.run_write(
+                    session_query,
+                    (self.tenant_id, self.session_id),
+                    tenant_id=self.tenant_id
+                )
         except Exception as e:
             print(f"Error adding message: {e}")
     

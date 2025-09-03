@@ -49,7 +49,12 @@ def fetch_chat_history(session_id: str, tenant_id: str) -> List[BaseMessage]:
         if item["role"] == "user":
             messages.append(HumanMessage(content=item["content"]))
         elif item["role"] == "assistant":
-            messages.append(AIMessage(content=item["content"]))
+            # Use structured_data if available (contains message + products), otherwise just content
+            if item.get("structured_data"):
+                import json
+                messages.append(AIMessage(content=json.dumps(item["structured_data"])))
+            else:
+                messages.append(AIMessage(content=item["content"]))
     
     return messages
 
